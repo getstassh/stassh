@@ -21,6 +21,7 @@ pub(crate) static HANDLER: ScreenHandler<YesNoState> = ScreenHandler {
     },
     render: ui,
     handle_key: handle_key,
+    handle_paste: |_, _, _| None,
     handle_tick: |_app, _| None,
 };
 

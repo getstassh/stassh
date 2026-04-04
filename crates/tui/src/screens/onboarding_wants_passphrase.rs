@@ -3,7 +3,7 @@ use crossterm::event::KeyEvent;
 use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
 
 use crate::{
-    inputs::handle_text_input,
+    inputs::{handle_pasted_text, handle_text_input},
     navigation::{Screen, StringState},
     screens::{AppEffect, ScreenHandler},
     ui::{centered_rect, dual_vertical_rect, full_rect, line_with_caret},
@@ -21,11 +21,12 @@ pub(crate) static HANDLER: ScreenHandler<StringState> = ScreenHandler {
     },
     render: ui,
     handle_key: handle_key,
+    handle_paste: handle_paste,
     handle_tick: |_app, _| None,
 };
 
 fn handle_key(_: &AppState, key: KeyEvent, state: &mut StringState) -> Option<AppEffect> {
-    let text = handle_text_input(state, key.code);
+    let text = handle_text_input(state, key);
     if let Some(text) = text {
         let text = text.to_string();
         return Some(Box::new(move |app| {
@@ -40,6 +41,11 @@ fn handle_key(_: &AppState, key: KeyEvent, state: &mut StringState) -> Option<Ap
             app.go_to_dashboard();
         }));
     }
+    None
+}
+
+fn handle_paste(_: &AppState, text: &str, state: &mut StringState) -> Option<AppEffect> {
+    handle_pasted_text(state, text);
     None
 }
 

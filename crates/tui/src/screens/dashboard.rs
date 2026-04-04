@@ -31,6 +31,7 @@ pub(crate) static HANDLER: ScreenHandler<DashboardState> = ScreenHandler {
     },
     render: ui,
     handle_key,
+    handle_paste,
     handle_tick: |_app, _| None,
 };
 
@@ -111,6 +112,13 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
     None
 }
 
+fn handle_paste(_app: &AppState, text: &str, state: &mut DashboardState) -> Option<AppEffect> {
+    if let Some(modal) = &mut state.host_modal {
+        insert_pasted_text(&mut modal.form, text);
+    }
+    None
+}
+
 fn handle_modal_key(
     app: &AppState,
     key: KeyEvent,
@@ -163,7 +171,7 @@ fn handle_modal_key(
         return save_modal(app, selected_host, modal);
     }
 
-    edit_form_field(&mut modal.form, key.code);
+    edit_form_field(&mut modal.form, key);
     None
 }
 
@@ -223,7 +231,14 @@ fn save_modal(
     }))
 }
 
-fn edit_form_field(form: &mut HostFormState, key_code: KeyCode) {
+fn edit_form_field(form: &mut HostFormState, key: KeyEvent) {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return;
+    }
+
     let target = match form.focus {
         HostFormField::Name => Some(&mut form.name),
         HostFormField::Host => Some(&mut form.host),
@@ -240,12 +255,34 @@ fn edit_form_field(form: &mut HostFormState, key_code: KeyCode) {
         return;
     };
 
-    match key_code {
+    match key.code {
         KeyCode::Char(c) => field.push(c),
         KeyCode::Backspace => {
             field.pop();
         }
         _ => {}
+    }
+}
+
+fn insert_pasted_text(form: &mut HostFormState, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+
+    let target = match form.focus {
+        HostFormField::Name => Some(&mut form.name),
+        HostFormField::Host => Some(&mut form.host),
+        HostFormField::User => Some(&mut form.user),
+        HostFormField::Port => Some(&mut form.port),
+        HostFormField::AuthValue => match form.auth_mode {
+            HostAuthMode::Key => Some(&mut form.key_path),
+            HostAuthMode::Password => Some(&mut form.password),
+        },
+        HostFormField::AuthMode => None,
+    };
+
+    if let Some(field) = target {
+        field.push_str(text);
     }
 }
 

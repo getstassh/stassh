@@ -24,6 +24,7 @@ struct ScreenHandler<S> {
     get_mut: fn(&mut Screen) -> Option<&mut S>,
     render: fn(&mut Frame, &AppState, &S),
     handle_key: fn(&AppState, KeyEvent, &mut S) -> Option<AppEffect>,
+    handle_paste: fn(&AppState, &str, &mut S) -> Option<AppEffect>,
     handle_tick: fn(&AppState, &mut S) -> Option<AppEffect>,
 }
 
@@ -31,6 +32,7 @@ pub(crate) trait AnyScreenHandler: Sync {
     fn matches(&self, screen: &Screen) -> bool;
     fn render(&self, frame: &mut Frame, app: &App);
     fn handle_key(&self, app: &mut App, key: KeyEvent);
+    fn handle_paste(&self, app: &mut App, text: &str);
     fn handle_tick(&self, app: &mut App);
 }
 
@@ -76,6 +78,22 @@ impl<S: 'static> AnyScreenHandler for ScreenHandler<S> {
             effect(app);
         }
     }
+
+    fn handle_paste(&self, app: &mut App, text: &str) {
+        let effect = {
+            let (app_state, screen) = app.state_and_screen_mut();
+
+            if let Some(state) = (self.get_mut)(screen) {
+                (self.handle_paste)(app_state, text, state)
+            } else {
+                None
+            }
+        };
+
+        if let Some(effect) = effect {
+            effect(app);
+        }
+    }
 }
 
 static HANDLERS: &[&dyn AnyScreenHandler] = &[
@@ -105,6 +123,7 @@ static EMPTY_HANDLER: ScreenHandler<()> = ScreenHandler {
         frame.render_widget(message, bottom);
     },
     handle_key: |_, _, _| None,
+    handle_paste: |_, _, _| None,
     handle_tick: |_, _| None,
 };
 

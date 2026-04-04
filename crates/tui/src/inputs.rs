@@ -1,4 +1,4 @@
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::navigation::{StringState, YesNoState};
 
@@ -15,7 +15,15 @@ pub(crate) fn handle_yes_no_input(state: &mut YesNoState, key_code: KeyCode) -> 
     }
 }
 
-pub(crate) fn handle_text_input(state: &mut StringState, key_code: KeyCode) -> Option<&str> {
+pub(crate) fn handle_text_input(state: &mut StringState, key: KeyEvent) -> Option<&str> {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return None;
+    }
+
+    let key_code = key.code;
     match key_code {
         KeyCode::Char(c) => {
             let mut text = state.text.clone();
@@ -48,4 +56,15 @@ pub(crate) fn handle_text_input(state: &mut StringState, key_code: KeyCode) -> O
         }
         _ => None,
     }
+}
+
+pub(crate) fn handle_pasted_text(state: &mut StringState, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+
+    let mut current = state.text.clone();
+    current.insert_str(state.caret_position, text);
+    state.set_text(current);
+    state.caret_position += text.len();
 }
