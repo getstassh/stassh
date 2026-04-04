@@ -243,9 +243,31 @@ fn ui_loading_logo(frame: &mut Frame, app: &AppState) {
 }
 
 fn ui_dashboard(frame: &mut Frame, app: &AppState) {
-    let size = frame.area();
-    let block = Block::default()
-        .style(Style::default().bg(Color::Green))
-        .title("Dashboard");
-    frame.render_widget(block, size);
+    let a = frame.area();
+
+    let (inner, area) = full_rect(a, "Stassh", "Use ←/→ or Tab to switch");
+
+    frame.render_widget(inner, a);
+
+    let welcome = Paragraph::new(format!(
+        "Welcome to stassh! You've been using the app for {} seconds.",
+        app.time_since_start().as_secs()
+    ))
+    .alignment(Alignment::Center);
+
+    let config = Paragraph::new(format!("Config: {:?}", app.config)).alignment(Alignment::Left);
+    let database = Paragraph::new(format!("Database: {:?}", app.db)).alignment(Alignment::Left);
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(50),
+            Constraint::Length(3),
+            Constraint::Length(3),
+        ])
+        .split(area);
+
+    frame.render_widget(welcome, layout[0]);
+    frame.render_widget(config, layout[1]);
+    frame.render_widget(database, layout[2]);
 }
