@@ -1,13 +1,13 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::db_crypto::{EncryptedPayload, decrypt_db, encrypt_db};
-use crate::migrations::{LATEST_DB_VERSION, migrate_db_value};
+use crate::db_crypto::{decrypt_db, encrypt_db, EncryptedPayload};
+use crate::migrations::{migrate_db_value, LATEST_DB_VERSION};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum DbEncryption {
@@ -22,7 +22,7 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn default() -> Self {
+    pub(crate) fn default() -> Self {
         Self {
             version: LATEST_DB_VERSION,
             index: 0,
@@ -55,7 +55,7 @@ fn db_path() -> Result<PathBuf> {
     Ok(dir.join("db.json"))
 }
 
-pub fn delete_db() -> Result<()> {
+pub(crate) fn delete_db() -> Result<()> {
     let path = db_path()?;
     if path.exists() {
         fs::remove_file(path)?;
@@ -63,7 +63,7 @@ pub fn delete_db() -> Result<()> {
     Ok(())
 }
 
-pub fn load_db(encryption: DbEncryption, passphrase: Option<&str>) -> Result<Database> {
+pub(crate) fn load_db(encryption: DbEncryption, passphrase: Option<&str>) -> Result<Database> {
     let path = db_path()?;
 
     if !path.exists() {
@@ -129,7 +129,11 @@ pub fn load_db(encryption: DbEncryption, passphrase: Option<&str>) -> Result<Dat
     }
 }
 
-pub fn save_db(db: &Database, encryption: DbEncryption, passphrase: Option<&str>) -> Result<()> {
+pub(crate) fn save_db(
+    db: &Database,
+    encryption: DbEncryption,
+    passphrase: Option<&str>,
+) -> Result<()> {
     let path = db_path()?;
 
     let db_value = serde_json::to_value(db).context("failed to serialize database for save")?;

@@ -9,7 +9,7 @@ use crate::{
     ui::{centered_rect, dual_vertical_rect, full_rect, line_with_caret},
 };
 
-pub fn onboarding_wants_passphrase_handler() -> ScreenHandler<StringState> {
+pub(crate) fn onboarding_wants_passphrase_handler() -> ScreenHandler<StringState> {
     ScreenHandler {
         matches: |s| matches!(s, Screen::OnboardingWantsPassphrase { .. }),
         get: |s| match s {

@@ -18,7 +18,7 @@ use crate::{
 
 use crate::screens::ScreenHandler;
 
-pub fn asking_passphrase_handler() -> ScreenHandler<StringState> {
+pub(crate) fn asking_passphrase_handler() -> ScreenHandler<StringState> {
     ScreenHandler {
         matches: |s| matches!(s, Screen::AskingPassphrase { .. }),
         get: |s| match s {

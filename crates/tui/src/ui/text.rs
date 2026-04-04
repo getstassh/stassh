@@ -5,7 +5,7 @@ use ratatui::{
 
 use crate::navigation::StringState;
 
-pub fn line_with_caret(state: &StringState) -> Line<'static> {
+pub(crate) fn line_with_caret(state: &StringState) -> Line<'static> {
     let text = state.visible_text();
     let caret = state.caret_position;
 

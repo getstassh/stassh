@@ -9,7 +9,7 @@ use crate::{
     ui::{button, dual_vertical_rect, full_rect},
 };
 
-pub fn onboarding_wants_encryption_handler() -> ScreenHandler<YesNoState> {
+pub(crate) fn onboarding_wants_encryption_handler() -> ScreenHandler<YesNoState> {
     ScreenHandler {
         matches: |s| matches!(s, Screen::OnboardingWantsEncryption { .. }),
         get: |s| match s {

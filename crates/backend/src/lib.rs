@@ -4,7 +4,9 @@ mod db_crypto;
 mod migrations;
 
 pub use crate::config::Config;
-pub use crate::db::{Database, DbEncryption, load_db, save_db};
+pub use crate::db::{Database, DbEncryption};
+
+use crate::db::{load_db, save_db};
 
 use anyhow::Result;
 

@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, PartialEq)]
-pub enum Screen {
+pub(crate) enum Screen {
     OnboardingWantsEncryption { state: YesNoState },
     OnboardingWantsPassphrase { state: StringState },
     AskingPassphrase { state: StringState },
@@ -7,37 +7,37 @@ pub enum Screen {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct YesNoState {
-    pub selected: bool,
+pub(crate) struct YesNoState {
+    pub(crate) selected: bool,
 }
 
 impl YesNoState {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { selected: true }
     }
 
-    pub fn toggle(&mut self) {
+    pub(crate) fn toggle(&mut self) {
         self.selected = !self.selected;
     }
 
-    pub fn is_yes(&self) -> bool {
+    pub(crate) fn is_yes(&self) -> bool {
         self.selected
     }
 
-    pub fn is_no(&self) -> bool {
+    pub(crate) fn is_no(&self) -> bool {
         !self.selected
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct StringState {
-    pub is_visible: bool,
-    pub text: String,
-    pub caret_position: usize,
+pub(crate) struct StringState {
+    pub(crate) is_visible: bool,
+    pub(crate) text: String,
+    pub(crate) caret_position: usize,
 }
 
 impl StringState {
-    pub fn invisible() -> Self {
+    pub(crate) fn invisible() -> Self {
         Self {
             is_visible: false,
             text: String::new(),
@@ -45,11 +45,11 @@ impl StringState {
         }
     }
 
-    pub fn set_text(&mut self, text: String) {
+    pub(crate) fn set_text(&mut self, text: String) {
         self.text = text;
     }
 
-    pub fn visible_text(&self) -> String {
+    pub(crate) fn visible_text(&self) -> String {
         let text = if self.is_visible {
             self.text.clone()
         } else {

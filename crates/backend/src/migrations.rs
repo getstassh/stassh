@@ -1,23 +1,23 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::db::Database;
 
-pub const LATEST_DB_VERSION: u32 = 1;
+pub(crate) const LATEST_DB_VERSION: u32 = 1;
 
 #[derive(Debug, Deserialize)]
 struct DatabaseV0 {
-    pub name: Option<String>,
-    pub index: Option<u32>,
+    name: Option<String>,
+    index: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct DatabaseV1 {
-    pub index: u32,
+struct DatabaseV1 {
+    index: u32,
 }
 
-pub fn migrate_db_value(value: Value) -> Result<(Database, bool)> {
+pub(crate) fn migrate_db_value(value: Value) -> Result<(Database, bool)> {
     let mut changed = false;
     let mut current_value = value;
     let mut current_version = parse_version(&current_value).unwrap_or(0);

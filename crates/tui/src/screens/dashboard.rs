@@ -11,7 +11,7 @@ use crate::{
     ui::full_rect,
 };
 
-pub fn dashboard_handler() -> ScreenHandler<Screen> {
+pub(crate) fn dashboard_handler() -> ScreenHandler<Screen> {
     ScreenHandler {
         matches: |s| matches!(s, Screen::Dashboard),
         get: |s| match s {

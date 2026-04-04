@@ -1,21 +1,21 @@
 use aes_gcm::{
-    Aes256Gcm, Nonce,
     aead::{Aead, KeyInit},
+    Aes256Gcm, Nonce,
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use argon2::Argon2;
-use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
-use rand::{RngCore, rngs::OsRng};
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use rand::{rngs::OsRng, RngCore};
 use serde_json::Value;
 
 #[derive(Debug, Clone)]
-pub struct EncryptedPayload {
-    pub salt_b64: String,
-    pub nonce_b64: String,
-    pub ciphertext_b64: String,
+pub(crate) struct EncryptedPayload {
+    pub(crate) salt_b64: String,
+    pub(crate) nonce_b64: String,
+    pub(crate) ciphertext_b64: String,
 }
 
-pub fn decrypt_db(passphrase: &str, payload: &EncryptedPayload) -> Result<Value> {
+pub(crate) fn decrypt_db(passphrase: &str, payload: &EncryptedPayload) -> Result<Value> {
     let salt = B64
         .decode(&payload.salt_b64)
         .context("invalid db salt encoding")?;
@@ -45,7 +45,7 @@ pub fn decrypt_db(passphrase: &str, payload: &EncryptedPayload) -> Result<Value>
     Ok(db)
 }
 
-pub fn encrypt_db(db: &Value, passphrase: &str) -> Result<EncryptedPayload> {
+pub(crate) fn encrypt_db(db: &Value, passphrase: &str) -> Result<EncryptedPayload> {
     let plaintext = serde_json::to_vec(db).context("failed to serialize database JSON")?;
 
     let mut salt = [0u8; 16];

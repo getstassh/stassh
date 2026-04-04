@@ -3,7 +3,7 @@ use ratatui::{
     widgets::{Block, Borders},
 };
 
-pub fn centered_rect<'a>(width: u16, height: u16, area: Rect) -> (Block<'a>, Rect, Rect) {
+pub(crate) fn centered_rect<'a>(width: u16, height: u16, area: Rect) -> (Block<'a>, Rect, Rect) {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -26,7 +26,11 @@ pub fn centered_rect<'a>(width: u16, height: u16, area: Rect) -> (Block<'a>, Rec
     (block, outer, inner)
 }
 
-pub fn full_rect<'a>(area: Rect, title_top: &'a str, title_bottom: &'a str) -> (Block<'a>, Rect) {
+pub(crate) fn full_rect<'a>(
+    area: Rect,
+    title_top: &'a str,
+    title_bottom: &'a str,
+) -> (Block<'a>, Rect) {
     let block = Block::default()
         .title(format!(" {} ", title_top.trim()))
         .title_bottom(format!(" {} ", title_bottom.trim()))
@@ -37,7 +41,7 @@ pub fn full_rect<'a>(area: Rect, title_top: &'a str, title_bottom: &'a str) -> (
     (block, inner)
 }
 
-pub fn dual_vertical_rect(area: Rect) -> (Rect, Rect) {
+pub(crate) fn dual_vertical_rect(area: Rect) -> (Rect, Rect) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])

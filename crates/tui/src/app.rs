@@ -4,13 +4,13 @@ use backend::DbEncryption;
 
 use crate::navigation::{Screen, StringState, YesNoState};
 
-pub struct App {
-    pub screen: Screen,
+pub(crate) struct App {
+    pub(crate) screen: Screen,
     backend: backend::AppState,
 }
 
 impl App {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut backend = backend::AppState::new();
 
         let screen = match backend.config.db_encryption.clone() {
@@ -29,11 +29,11 @@ impl App {
         Self { screen, backend }
     }
 
-    pub fn state(&self) -> &backend::AppState {
+    pub(crate) fn state(&self) -> &backend::AppState {
         &self.backend
     }
 
-    pub fn state_and_screen_mut(&mut self) -> (&backend::AppState, &mut Screen) {
+    pub(crate) fn state_and_screen_mut(&mut self) -> (&backend::AppState, &mut Screen) {
         (&self.backend, &mut self.screen)
     }
 }

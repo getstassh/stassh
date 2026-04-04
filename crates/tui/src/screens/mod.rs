@@ -20,7 +20,7 @@ struct ScreenHandler<S> {
     handle_tick: fn(&AppState, &mut S) -> Option<AppEffect>,
 }
 
-pub trait AnyScreenHandler {
+pub(crate) trait AnyScreenHandler {
     fn matches(&self, screen: &Screen) -> bool;
     fn render(&self, frame: &mut Frame, app: &App);
     fn handle_key(&self, app: &mut App, key: KeyCode);
@@ -71,7 +71,7 @@ impl<S: 'static> AnyScreenHandler for ScreenHandler<S> {
     }
 }
 
-pub fn get_handlers() -> Vec<Box<dyn AnyScreenHandler>> {
+pub(crate) fn get_handlers() -> Vec<Box<dyn AnyScreenHandler>> {
     vec![
         Box::new(dashboard::dashboard_handler()),
         Box::new(onboarding_wants_encryption::onboarding_wants_encryption_handler()),
@@ -89,7 +89,7 @@ static EMPTY_HANDLER: ScreenHandler<()> = ScreenHandler {
     handle_tick: |_, _| None,
 };
 
-pub fn get_handler_for_screen<'a>(
+pub(crate) fn get_handler_for_screen<'a>(
     handlers: &'a [Box<dyn AnyScreenHandler>],
     screen: &Screen,
 ) -> &'a dyn AnyScreenHandler {

@@ -14,18 +14,18 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn default() -> Self {
+    pub(crate) fn default() -> Self {
         Self {
             enable_telemetry: None,
             db_encryption: None,
         }
     }
 
-    pub fn load_config() -> Self {
+    pub(crate) fn load_config() -> Self {
         load_config().unwrap_or_else(|_| Self::default())
     }
 
-    pub fn save_config(&self) -> Result<()> {
+    pub(crate) fn save_config(&self) -> Result<()> {
         let path = config_path()?;
         let text = serde_json::to_string_pretty(self)?;
         fs::write(path, text)?;
@@ -45,7 +45,7 @@ fn config_path() -> Result<PathBuf> {
     Ok(dir.join("config.json"))
 }
 
-pub fn delete_config() -> Result<()> {
+pub(crate) fn delete_config() -> Result<()> {
     let path = config_path()?;
     if path.exists() {
         fs::remove_file(path)?;
@@ -53,7 +53,7 @@ pub fn delete_config() -> Result<()> {
     Ok(())
 }
 
-pub fn load_config() -> Result<Config> {
+fn load_config() -> Result<Config> {
     let path = config_path()?;
 
     if !path.exists() {
