@@ -15,12 +15,15 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     prelude::{Color, Frame, Line, Style},
     style::Modifier,
+    text::{Span, Text},
     widgets::{Block, Borders, Paragraph},
 };
 
 use crate::ui::{button, centered_rect, dual_vertical_rect, full_rect, line_with_caret};
 
 mod ui;
+
+const ASCII_ART: &str = include_str!("../ascii-art.txt");
 
 fn main() -> Result<()> {
     enable_raw_mode()?;
@@ -78,10 +81,6 @@ fn run_app(
 
         if app.should_quit() {
             return Ok(());
-        }
-
-        if app.screen == backend::Screen::LoadingLogo {
-            continue;
         }
 
         if app.screen == backend::Screen::Dashboard {
@@ -334,12 +333,49 @@ fn ui_asking_passphrase(frame: &mut Frame, _app: &AppState, state: &backend::Str
     frame.render_widget(passphrase, text_area);
 }
 
-fn ui_loading_logo(frame: &mut Frame, app: &AppState) {
+fn ui_loading_logo(frame: &mut Frame, _app: &AppState) {
+    const BG_HEX: u32 = 0x001521;
+    const WHITE_HEX: u32 = 0xFFFFFF;
+    const ORANGE_HEX: u32 = 0xE77500;
+    const SPLIT_COL: usize = 50;
+
+    let bg = hex_color(BG_HEX);
+    let white = hex_color(WHITE_HEX);
+    let orange = hex_color(ORANGE_HEX);
+
     let size = frame.area();
-    let block = Block::default()
-        .style(Style::default().bg(Color::Blue))
-        .title("Loading stassh...");
+    let block = Block::default().style(Style::default().bg(bg));
+
+    let mut lines = Vec::new();
+    for raw_line in ASCII_ART.lines() {
+        let split_idx = raw_line
+            .char_indices()
+            .nth(SPLIT_COL)
+            .map(|(idx, _)| idx)
+            .unwrap_or(raw_line.len());
+        let (left, right) = raw_line.split_at(split_idx);
+
+        lines.push(Line::from(vec![
+            Span::styled(left.to_string(), Style::default().fg(white).bg(bg)),
+            Span::styled(right.to_string(), Style::default().fg(orange).bg(bg)),
+        ]));
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::from(Span::styled(
+        "Created by Lazar (bylazar.com)",
+        Style::default().fg(white).bg(bg),
+    )));
+
+    let art = Paragraph::new(Text::from(lines)).alignment(Alignment::Center);
     frame.render_widget(block, size);
+    frame.render_widget(art, size);
+}
+
+fn hex_color(hex: u32) -> Color {
+    let r = ((hex >> 16) & 0xFF) as u8;
+    let g = ((hex >> 8) & 0xFF) as u8;
+    let b = (hex & 0xFF) as u8;
+    Color::Rgb(r, g, b)
 }
 
 fn ui_dashboard(frame: &mut Frame, app: &AppState) {
