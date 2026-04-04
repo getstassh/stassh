@@ -17,14 +17,6 @@ use ratatui::{
     widgets::{Block, Paragraph},
 };
 
-enum Screen {
-    LoadingLogo,
-    OnboardingWantsEncryption,
-    OnboardingWantsPassphrase,
-    AskingPassphrase,
-    Dashboard,
-}
-
 fn main() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -32,22 +24,8 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // TODO: load config and db, pass to app state
     let config = backend::Config::load_config();
-    match config.db_encryption {
-        None => {
-            // ask user if they want to encrypt the db, if yes, ask for passphrase and create new db with encryption
-            // if no, create new db without encryption
-        }
-        Some(backend::DbEncryption::None) => {
-            // load db without encryption
-        }
-        Some(backend::DbEncryption::Passphrase) => {
-            // ask for passphrase, load db with encryption
-        }
-    }
-
-    let mut app = AppState::new(config, backend::Database::default());
+    let mut app = AppState::new(config);
     let app_result = run_app(&mut terminal, &mut app);
 
     disable_raw_mode()?;
@@ -71,15 +49,37 @@ fn run_app(
     loop {
         terminal.draw(|frame| ui(frame, app))?;
 
+        if app.time_since_start() > Duration::from_secs(1)
+            && app.screen == backend::Screen::LoadingLogo
+        {
+            app.set_screen(app.target_screen.clone());
+        }
+
         if app.should_quit() {
             return Ok(());
         }
 
         if event::poll(tick_rate)? {
             if let Event::Key(key) = event::read()? {
+                let key_code = key.code;
                 if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('q') => app.request_quit(),
+                    if (key_code == KeyCode::Char('q')) {
+                        app.request_quit();
+                    }
+
+                    match app.screen {
+                        backend::Screen::OnboardingWantsEncryption => {
+                            if key_code == KeyCode::Char('y') {
+                                app.config.db_encryption = Some(backend::DbEncryption::Passphrase);
+                                // save config
+                                app.set_screen(backend::Screen::OnboardingWantsPassphrase);
+                            }
+                            if key_code == KeyCode::Char('n') {
+                                app.config.db_encryption = Some(backend::DbEncryption::None);
+                                // save config
+                                app.set_screen(backend::Screen::Dashboard);
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -89,27 +89,51 @@ fn run_app(
 }
 
 fn ui(frame: &mut Frame, app: &AppState) {
-    let [header, body, footer] = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(1),
-        Constraint::Length(3),
-    ])
-    .areas(frame.area());
+    match app.screen {
+        backend::Screen::LoadingLogo => ui_loading_logo(frame, app),
+        backend::Screen::OnboardingWantsEncryption => ui_onboarding_wants_encryption(frame, app),
+        backend::Screen::OnboardingWantsPassphrase => ui_onboarding_wants_passphrase(frame, app),
+        backend::Screen::AskingPassphrase => ui_asking_passphrase(frame, app),
+        backend::Screen::Dashboard => ui_dashboard(frame, app),
+    }
+}
 
-    let title = Paragraph::new(Line::from(app.app_name()).style(Style::default().fg(Color::Green)))
-        .block(Block::bordered().title("App"));
+fn ui_onboarding_wants_encryption(frame: &mut Frame, app: &AppState) {
+    let size = frame.area();
+    let block = Block::default()
+        .style(Style::default().bg(Color::Yellow))
+        .title("Do you want to encrypt your database? (y/n)");
+    frame.render_widget(block, size);
+}
 
-    let content = Paragraph::new(vec![Line::from("Press any key to tick, press q to quit.")])
-        .block(Block::bordered().title("Dashboard"))
-        .style(Style::default().fg(Color::Cyan));
+fn ui_onboarding_wants_passphrase(frame: &mut Frame, app: &AppState) {
+    let size = frame.area();
+    let block = Block::default()
+        .style(Style::default().bg(Color::Yellow))
+        .title("Enter a passphrase to encrypt your database:");
+    frame.render_widget(block, size);
+}
 
-    let status = Paragraph::new(
-        Line::from("crossterm + ratatui workspace scaffold")
-            .style(Style::default().fg(Color::Yellow)),
-    )
-    .block(Block::bordered().title("Status"));
+fn ui_asking_passphrase(frame: &mut Frame, app: &AppState) {
+    let size = frame.area();
+    let block = Block::default()
+        .style(Style::default().bg(Color::Yellow))
+        .title("Enter your passphrase to unlock your database:");
+    frame.render_widget(block, size);
+}
 
-    frame.render_widget(title, header);
-    frame.render_widget(content, body);
-    frame.render_widget(status, footer);
+fn ui_loading_logo(frame: &mut Frame, app: &AppState) {
+    let size = frame.area();
+    let block = Block::default()
+        .style(Style::default().bg(Color::Blue))
+        .title("Loading stassh...");
+    frame.render_widget(block, size);
+}
+
+fn ui_dashboard(frame: &mut Frame, app: &AppState) {
+    let size = frame.area();
+    let block = Block::default()
+        .style(Style::default().bg(Color::Green))
+        .title("Dashboard");
+    frame.render_widget(block, size);
 }
