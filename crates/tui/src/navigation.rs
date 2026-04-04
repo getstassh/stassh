@@ -4,7 +4,28 @@ pub(crate) enum Screen {
     OnboardingWantsPassphrase { state: StringState },
     OnboardingWantsTelemetry { state: YesNoState },
     AskingPassphrase { state: StringState },
-    Dashboard { state: () },
+    Dashboard { state: DashboardState },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum DashboardPage {
+    Home,
+    Settings,
+    Debug,
+    Credits,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct DashboardState {
+    pub(crate) active_page: DashboardPage,
+}
+
+impl DashboardState {
+    pub(crate) fn new() -> Self {
+        Self {
+            active_page: DashboardPage::Home,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

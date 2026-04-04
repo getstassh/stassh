@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 
 use backend::DbEncryption;
 
-use crate::navigation::{Screen, StringState, YesNoState};
+use crate::navigation::{DashboardState, Screen, StringState, YesNoState};
 
 pub(crate) struct App {
     pub(crate) screen: Screen,
@@ -16,7 +16,9 @@ impl App {
         let screen = match backend.config.db_encryption.clone() {
             Some(DbEncryption::None) => {
                 let _ = backend.load_db();
-                Screen::Dashboard { state: () }
+                Screen::Dashboard {
+                    state: DashboardState::new(),
+                }
             }
             Some(DbEncryption::Passphrase) => Screen::AskingPassphrase {
                 state: StringState::invisible(),
@@ -44,7 +46,9 @@ impl App {
             };
             return;
         }
-        self.screen = Screen::Dashboard { state: () };
+        self.screen = Screen::Dashboard {
+            state: DashboardState::new(),
+        };
     }
 }
 
