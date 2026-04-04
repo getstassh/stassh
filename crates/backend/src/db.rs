@@ -1,7 +1,11 @@
+use std::fs;
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
+use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
+
+use crate::db_crypto::{EncryptedPayload, decrypt_db, encrypt_db};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum DbEncryption {
@@ -13,6 +17,7 @@ pub enum DbEncryption {
 pub struct Database {
     pub version: u32,
     pub name: Option<String>,
+    pub index: u32,
 }
 
 impl Database {
@@ -20,6 +25,100 @@ impl Database {
         Self {
             version: 0,
             name: None,
+            index: 0,
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+enum StoredDb {
+    Plain {
+        db: Database,
+    },
+    EncryptedV1 {
+        salt_b64: String,
+        nonce_b64: String,
+        ciphertext_b64: String,
+    },
+}
+
+fn project_dirs() -> Result<ProjectDirs> {
+    ProjectDirs::from("com", "bylazar", "stassh")
+        .ok_or_else(|| anyhow::anyhow!("could not determine app dirs"))
+}
+
+fn db_path() -> Result<PathBuf> {
+    let dirs = project_dirs()?;
+    let dir = dirs.data_dir();
+    fs::create_dir_all(dir)?;
+    Ok(dir.join("db.json"))
+}
+
+pub fn delete_db() -> Result<()> {
+    let path = db_path()?;
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+pub fn load_db(encryption: DbEncryption, passphrase: Option<&str>) -> Result<Database> {
+    let path = db_path()?;
+
+    if !path.exists() {
+        return Ok(Database::default());
+    }
+
+    let text = fs::read_to_string(&path)
+        .with_context(|| format!("failed to read db file {}", path.display()))?;
+
+    let stored: StoredDb = serde_json::from_str(&text)
+        .with_context(|| format!("failed to parse db JSON from {}", path.display()))?;
+
+    match stored {
+        StoredDb::Plain { db } => Ok(db),
+        StoredDb::EncryptedV1 {
+            salt_b64,
+            nonce_b64,
+            ciphertext_b64,
+        } => {
+            if !matches!(encryption, DbEncryption::Passphrase) {
+                bail!("database is encrypted but passphrase mode is not enabled");
+            }
+            let passphrase =
+                passphrase.context("missing passphrase for encrypted database decryption")?;
+            decrypt_db(
+                passphrase,
+                &EncryptedPayload {
+                    salt_b64,
+                    nonce_b64,
+                    ciphertext_b64,
+                },
+            )
+        }
+    }
+}
+
+pub fn save_db(db: &Database, encryption: DbEncryption, passphrase: Option<&str>) -> Result<()> {
+    let path = db_path()?;
+
+    let stored = match encryption {
+        DbEncryption::None => StoredDb::Plain { db: db.clone() },
+        DbEncryption::Passphrase => {
+            let passphrase =
+                passphrase.context("missing passphrase for encrypted database save")?;
+            let payload = encrypt_db(db, passphrase)?;
+            StoredDb::EncryptedV1 {
+                salt_b64: payload.salt_b64,
+                nonce_b64: payload.nonce_b64,
+                ciphertext_b64: payload.ciphertext_b64,
+            }
+        }
+    };
+
+    let text = serde_json::to_string_pretty(&stored)?;
+    fs::write(&path, text)
+        .with_context(|| format!("failed to write db file {}", path.display()))?;
+    Ok(())
 }

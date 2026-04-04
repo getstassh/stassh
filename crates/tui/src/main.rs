@@ -57,11 +57,42 @@ fn run_app(
         if app.time_since_start() > Duration::from_secs(1)
             && app.screen == backend::Screen::LoadingLogo
         {
-            app.set_screen(app.target_screen.clone());
+            match app.config.db_encryption {
+                Some(backend::DbEncryption::Passphrase) => {
+                    app.set_screen(backend::Screen::AskingPassphrase {
+                        state: backend::StringState::invisible(),
+                    });
+                }
+                Some(backend::DbEncryption::None) => {
+                    app.db = backend::load_db(backend::DbEncryption::None, None)
+                        .unwrap_or_else(|_| backend::Database::default());
+                    app.set_screen(backend::Screen::Dashboard);
+                }
+                None => {
+                    app.set_screen(backend::Screen::OnboardingWantsEncryption {
+                        state: backend::YesNoState::new(),
+                    });
+                }
+            }
         }
 
         if app.should_quit() {
             return Ok(());
+        }
+
+        if app.screen == backend::Screen::LoadingLogo {
+            continue;
+        }
+
+        if app.screen == backend::Screen::Dashboard {
+            app.db.index = app.db.index.wrapping_add(1);
+            if app.config.db_encryption.is_some() {
+                let _ = backend::save_db(
+                    &app.db,
+                    app.config.db_encryption.clone().unwrap(),
+                    app.password.as_deref(),
+                );
+            }
         }
 
         if event::poll(tick_rate)? {
@@ -74,6 +105,8 @@ fn run_app(
 
                     let mut selected_encryption: Option<backend::DbEncryption> = None;
                     let mut next_screen: Option<backend::Screen> = None;
+                    let mut entered_passphrase: Option<String> = None;
+                    let mut unlock_passphrase: Option<String> = None;
 
                     match &mut app.screen {
                         backend::Screen::OnboardingWantsEncryption { state } => {
@@ -87,7 +120,6 @@ fn run_app(
                                 || (key_code == KeyCode::Enter && state.is_yes())
                             {
                                 selected_encryption = Some(backend::DbEncryption::Passphrase);
-                                app.config.save_config().ok();
                                 next_screen = Some(backend::Screen::OnboardingWantsPassphrase {
                                     state: backend::StringState::invisible(),
                                 });
@@ -96,12 +128,10 @@ fn run_app(
                                 || (key_code == KeyCode::Enter && state.is_no())
                             {
                                 selected_encryption = Some(backend::DbEncryption::None);
-                                app.config.save_config().ok();
                                 next_screen = Some(backend::Screen::Dashboard);
                             }
                         }
-                        backend::Screen::OnboardingWantsPassphrase { state }
-                        | backend::Screen::AskingPassphrase { state } => match key_code {
+                        backend::Screen::OnboardingWantsPassphrase { state } => match key_code {
                             KeyCode::Char(c) => {
                                 let mut text = state.text.clone();
                                 text.insert(state.caret_position, c);
@@ -118,8 +148,38 @@ fn run_app(
                             }
                             KeyCode::Enter => {
                                 selected_encryption = Some(backend::DbEncryption::Passphrase);
-                                app.config.save_config().ok();
+                                entered_passphrase = Some(state.text.clone());
                                 next_screen = Some(backend::Screen::Dashboard);
+                            }
+                            KeyCode::Left => {
+                                if state.caret_position > 0 {
+                                    state.caret_position -= 1;
+                                }
+                            }
+                            KeyCode::Right => {
+                                if state.caret_position < state.text.len() {
+                                    state.caret_position += 1;
+                                }
+                            }
+                            _ => {}
+                        },
+                        backend::Screen::AskingPassphrase { state } => match key_code {
+                            KeyCode::Char(c) => {
+                                let mut text = state.text.clone();
+                                text.insert(state.caret_position, c);
+                                state.set_text(text);
+                                state.caret_position += 1;
+                            }
+                            KeyCode::Backspace => {
+                                let mut text = state.text.clone();
+                                if state.caret_position > 0 {
+                                    text.remove(state.caret_position - 1);
+                                    state.set_text(text);
+                                    state.caret_position -= 1;
+                                }
+                            }
+                            KeyCode::Enter => {
+                                unlock_passphrase = Some(state.text.clone());
                             }
                             KeyCode::Left => {
                                 if state.caret_position > 0 {
@@ -138,10 +198,50 @@ fn run_app(
 
                     if let Some(encryption) = selected_encryption {
                         app.config.db_encryption = Some(encryption);
+                        app.config.save_config().ok();
+                    }
+
+                    if let Some(passphrase) = entered_passphrase {
+                        app.password = Some(passphrase);
                     }
 
                     if let Some(screen) = next_screen {
+                        if screen == backend::Screen::Dashboard {
+                            match app.config.db_encryption {
+                                Some(backend::DbEncryption::None) => {
+                                    app.db = backend::load_db(backend::DbEncryption::None, None)
+                                        .unwrap_or_else(|_| backend::Database::default());
+                                    let _ = backend::save_db(
+                                        &app.db,
+                                        backend::DbEncryption::None,
+                                        None,
+                                    );
+                                }
+                                Some(backend::DbEncryption::Passphrase) => {
+                                    app.db = backend::load_db(
+                                        backend::DbEncryption::Passphrase,
+                                        app.password.as_deref(),
+                                    )
+                                    .unwrap_or_else(|_| backend::Database::default());
+                                    let _ = backend::save_db(
+                                        &app.db,
+                                        backend::DbEncryption::Passphrase,
+                                        app.password.as_deref(),
+                                    );
+                                }
+                                None => {}
+                            }
+                        }
                         app.set_screen(screen);
+                    }
+
+                    if let Some(passphrase) = unlock_passphrase
+                        && let Ok(db) =
+                            backend::load_db(backend::DbEncryption::Passphrase, Some(&passphrase))
+                    {
+                        app.password = Some(passphrase);
+                        app.db = db;
+                        app.set_screen(backend::Screen::Dashboard);
                     }
                 }
             }

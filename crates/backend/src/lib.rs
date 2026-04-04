@@ -1,53 +1,37 @@
 mod config;
 mod db;
+mod db_crypto;
 mod screen;
 
 pub use crate::config::Config;
-pub use crate::db::{Database, DbEncryption};
+pub use crate::db::{Database, DbEncryption, load_db, save_db};
 pub use crate::screen::{Screen, StringState, YesNoState};
+
+use anyhow::Result;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub app_name: String,
     pub started_timestamp: std::time::SystemTime,
-    pub target_screen: Screen,
     pub should_quit: bool,
 
     pub screen: Screen,
     pub config: Config,
     pub db: Database,
+
+    pub password: Option<String>,
 }
 
 impl AppState {
     pub fn new(config: Config) -> Self {
-        let mut default_screen = Screen::LoadingLogo;
-        match config.db_encryption {
-            None => {
-                default_screen = Screen::OnboardingWantsEncryption {
-                    state: YesNoState::new(),
-                };
-                // ask user if they want to encrypt the db, if yes, ask for passphrase and create new db with encryption
-                // if no, create new db without encryption
-            }
-            Some(DbEncryption::None) => {
-                default_screen = Screen::Dashboard;
-                // load db without encryption
-            }
-            Some(DbEncryption::Passphrase) => {
-                default_screen = Screen::AskingPassphrase {
-                    state: StringState::invisible(),
-                };
-                // ask for passphrase, load db with encryption
-            }
-        }
         Self {
             app_name: "stassh".to_string(),
             started_timestamp: Self::get_timestamp(),
-            target_screen: default_screen,
             should_quit: false,
             screen: Screen::LoadingLogo,
             config,
             db: Database::default(),
+            password: None,
         }
     }
 
@@ -73,5 +57,11 @@ impl AppState {
 
     pub fn request_quit(&mut self) {
         self.should_quit = true;
+    }
+
+    pub fn delete_data(&mut self) -> Result<()> {
+        config::delete_config()?;
+        db::delete_db()?;
+        Ok(())
     }
 }
