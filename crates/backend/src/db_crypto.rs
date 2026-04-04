@@ -1,11 +1,11 @@
 use aes_gcm::{
-    aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use argon2::Argon2;
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-use rand::{rngs::OsRng, RngCore};
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use rand::{RngCore, rngs::OsRng};
 use serde_json::Value;
 
 #[derive(Debug, Clone)]

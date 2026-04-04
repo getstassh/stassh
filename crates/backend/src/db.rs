@@ -1,13 +1,13 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::db_crypto::{decrypt_db, encrypt_db, EncryptedPayload};
-use crate::migrations::{migrate_db_value, LATEST_DB_VERSION};
+use crate::db_crypto::{EncryptedPayload, decrypt_db, encrypt_db};
+use crate::migrations::{LATEST_DB_VERSION, migrate_db_value};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum DbEncryption {

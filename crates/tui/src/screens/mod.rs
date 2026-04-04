@@ -5,6 +5,7 @@ use ratatui::Frame;
 use crate::{app::App, navigation::Screen};
 
 mod asking_passphrase;
+mod components;
 mod dashboard;
 mod onboarding_wants_encryption;
 mod onboarding_wants_passphrase;

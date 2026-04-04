@@ -2,21 +2,16 @@ use backend::AppState;
 use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
-    prelude::Color,
-    style::Style,
-    text::{Line, Span, Text},
+    layout::{Alignment, Constraint, Direction, Layout},
     widgets::Paragraph,
 };
 
 use crate::{
     inputs::handle_text_input,
     navigation::{Screen, StringState},
-    screens::AppEffect,
+    screens::{AppEffect, ScreenHandler, components::render_logo_with_credits},
     ui::{centered_rect, full_rect, line_with_caret},
 };
-
-use crate::screens::ScreenHandler;
 
 pub(crate) fn asking_passphrase_handler() -> ScreenHandler<StringState> {
     ScreenHandler {
@@ -52,8 +47,6 @@ fn handle_key(_: &AppState, key_code: KeyCode, state: &mut StringState) -> Optio
     None
 }
 
-const ASCII_ART: &str = include_str!("../../ascii-art.txt");
-
 fn ui(frame: &mut Frame, _app: &AppState, state: &StringState) {
     let a = frame.area();
 
@@ -68,11 +61,10 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &StringState) {
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(ASCII_ART.lines().count() as u16 + 2),
+            Constraint::Min(0),
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(3),
-            Constraint::Min(0),
         ])
         .split(area);
 
@@ -84,43 +76,4 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &StringState) {
     frame.render_widget(text_box, text_box_area);
     let passphrase = Paragraph::new(line_with_caret(state)).alignment(Alignment::Left);
     frame.render_widget(passphrase, text_area);
-}
-
-fn render_logo_with_credits(frame: &mut Frame, area: Rect) {
-    const WHITE_HEX: u32 = 0xFFFFFF;
-    const ORANGE_HEX: u32 = 0xE77500;
-    const SPLIT_COL: usize = 44;
-
-    let white = hex_color(WHITE_HEX);
-    let orange = hex_color(ORANGE_HEX);
-
-    let mut lines = Vec::new();
-    for raw_line in ASCII_ART.lines() {
-        let split_idx = raw_line
-            .char_indices()
-            .nth(SPLIT_COL)
-            .map(|(idx, _)| idx)
-            .unwrap_or(raw_line.len());
-        let (left, right) = raw_line.split_at(split_idx);
-
-        lines.push(Line::from(vec![
-            Span::styled(left.to_string(), Style::default().fg(white)),
-            Span::styled(right.to_string(), Style::default().fg(orange)),
-        ]));
-    }
-    lines.push(Line::raw(""));
-    lines.push(Line::from(Span::styled(
-        "Created by Lazar (bylazar.com)",
-        Style::default().fg(white),
-    )));
-
-    let art = Paragraph::new(Text::from(lines)).alignment(Alignment::Center);
-    frame.render_widget(art, area);
-}
-
-fn hex_color(hex: u32) -> Color {
-    let r = ((hex >> 16) & 0xFF) as u8;
-    let g = ((hex >> 8) & 0xFF) as u8;
-    let b = (hex & 0xFF) as u8;
-    Color::Rgb(r, g, b)
 }
