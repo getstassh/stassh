@@ -11,31 +11,23 @@ use crate::{
     ui::full_rect,
 };
 
-pub(crate) fn dashboard_handler() -> ScreenHandler<Screen> {
-    ScreenHandler {
-        matches: |s| matches!(s, Screen::Dashboard),
-        get: |s| match s {
-            Screen::Dashboard => Some(s),
-            _ => None,
-        },
-        get_mut: |s| match s {
-            Screen::Dashboard => Some(s),
-            _ => None,
-        },
-        render: ui,
-        handle_key: |_app, _key_code, _| None,
-        handle_tick: handle_tick,
-    }
-}
+pub(crate) static HANDLER: ScreenHandler<()> = ScreenHandler {
+    matches: |s| matches!(s, Screen::Dashboard),
+    get: |_| None,
+    get_mut: |_| None,
+    render: ui,
+    handle_key: |_app, _key_code, _| None,
+    handle_tick: handle_tick,
+};
 
-fn handle_tick(_app: &AppState, _state: &mut Screen) -> Option<AppEffect> {
+fn handle_tick(_app: &AppState, _state: &mut ()) -> Option<AppEffect> {
     return Some(Box::new(move |app| {
         app.db.index += 1;
         let _ = app.save_db();
     }));
 }
 
-fn ui(frame: &mut Frame, app: &AppState, _kind: &Screen) {
+fn ui(frame: &mut Frame, app: &AppState, _state: &()) {
     let a = frame.area();
 
     let (inner, area) = full_rect(a, "Stassh", "Use ←/→ or Tab to switch");

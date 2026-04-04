@@ -9,22 +9,20 @@ use crate::{
     ui::{button, dual_vertical_rect, full_rect},
 };
 
-pub(crate) fn onboarding_wants_encryption_handler() -> ScreenHandler<YesNoState> {
-    ScreenHandler {
-        matches: |s| matches!(s, Screen::OnboardingWantsEncryption { .. }),
-        get: |s| match s {
-            Screen::OnboardingWantsEncryption { state } => Some(state),
-            _ => None,
-        },
-        get_mut: |s| match s {
-            Screen::OnboardingWantsEncryption { state } => Some(state),
-            _ => None,
-        },
-        render: ui,
-        handle_key: handle_key,
-        handle_tick: |_app, _| None,
-    }
-}
+pub(crate) static HANDLER: ScreenHandler<YesNoState> = ScreenHandler {
+    matches: |s| matches!(s, Screen::OnboardingWantsEncryption { .. }),
+    get: |s| match s {
+        Screen::OnboardingWantsEncryption { state } => Some(state),
+        _ => None,
+    },
+    get_mut: |s| match s {
+        Screen::OnboardingWantsEncryption { state } => Some(state),
+        _ => None,
+    },
+    render: ui,
+    handle_key: handle_key,
+    handle_tick: |_app, _| None,
+};
 
 fn handle_key(_: &AppState, key_code: KeyCode, state: &mut YesNoState) -> Option<AppEffect> {
     let result = handle_yes_no_input(state, key_code);

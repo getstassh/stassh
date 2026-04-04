@@ -9,26 +9,27 @@ use ratatui::{
 use crate::{
     inputs::handle_text_input,
     navigation::{Screen, StringState},
-    screens::{AppEffect, ScreenHandler, components::render_logo_with_credits},
+    screens::{
+        AppEffect, ScreenHandler,
+        components::{LogoType, render_logo},
+    },
     ui::{centered_rect, full_rect, line_with_caret},
 };
 
-pub(crate) fn asking_passphrase_handler() -> ScreenHandler<StringState> {
-    ScreenHandler {
-        matches: |s| matches!(s, Screen::AskingPassphrase { .. }),
-        get: |s| match s {
-            Screen::AskingPassphrase { state } => Some(state),
-            _ => None,
-        },
-        get_mut: |s| match s {
-            Screen::AskingPassphrase { state } => Some(state),
-            _ => None,
-        },
-        render: ui,
-        handle_key: handle_key,
-        handle_tick: |_app, _| None,
-    }
-}
+pub(crate) static HANDLER: ScreenHandler<StringState> = ScreenHandler {
+    matches: |s| matches!(s, Screen::AskingPassphrase { .. }),
+    get: |s| match s {
+        Screen::AskingPassphrase { state } => Some(state),
+        _ => None,
+    },
+    get_mut: |s| match s {
+        Screen::AskingPassphrase { state } => Some(state),
+        _ => None,
+    },
+    render: ui,
+    handle_key: handle_key,
+    handle_tick: |_app, _| None,
+};
 
 fn handle_key(_: &AppState, key_code: KeyCode, state: &mut StringState) -> Option<AppEffect> {
     let text = handle_text_input(state, key_code);
@@ -41,7 +42,7 @@ fn handle_key(_: &AppState, key_code: KeyCode, state: &mut StringState) -> Optio
                 panic!("Failed to load database with provided passphrase: {e}");
             }
 
-            app.screen = Screen::Dashboard;
+            app.go_to_dashboard();
         }));
     }
     None
@@ -68,7 +69,7 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &StringState) {
         ])
         .split(area);
 
-    render_logo_with_credits(frame, layout[0]);
+    render_logo(frame, layout[0], LogoType::WithCredits);
 
     let question = Paragraph::new("Enter your passphrase:").alignment(Alignment::Center);
     frame.render_widget(question, layout[2]);

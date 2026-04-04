@@ -36,6 +36,16 @@ impl App {
     pub(crate) fn state_and_screen_mut(&mut self) -> (&backend::AppState, &mut Screen) {
         (&self.backend, &mut self.screen)
     }
+
+    pub(crate) fn go_to_dashboard(&mut self) {
+        if self.config.enable_telemetry.is_none() {
+            self.screen = Screen::OnboardingWantsTelemetry {
+                state: YesNoState::new(),
+            };
+            return;
+        }
+        self.screen = Screen::Dashboard;
+    }
 }
 
 impl Deref for App {

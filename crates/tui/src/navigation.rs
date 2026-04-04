@@ -2,6 +2,7 @@
 pub(crate) enum Screen {
     OnboardingWantsEncryption { state: YesNoState },
     OnboardingWantsPassphrase { state: StringState },
+    OnboardingWantsTelemetry { state: YesNoState },
     AskingPassphrase { state: StringState },
     Dashboard,
 }

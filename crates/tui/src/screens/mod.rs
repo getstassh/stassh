@@ -1,8 +1,13 @@
 use backend::AppState;
 use crossterm::event::KeyCode;
-use ratatui::Frame;
+use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
 
-use crate::{app::App, navigation::Screen};
+use crate::{
+    app::App,
+    navigation::Screen,
+    screens::components::{LogoType, render_logo},
+    ui::{dual_vertical_rect, full_rect},
+};
 
 mod asking_passphrase;
 mod components;
@@ -21,7 +26,7 @@ struct ScreenHandler<S> {
     handle_tick: fn(&AppState, &mut S) -> Option<AppEffect>,
 }
 
-pub(crate) trait AnyScreenHandler {
+pub(crate) trait AnyScreenHandler: Sync {
     fn matches(&self, screen: &Screen) -> bool;
     fn render(&self, frame: &mut Frame, app: &App);
     fn handle_key(&self, app: &mut App, key: KeyCode);
@@ -72,31 +77,39 @@ impl<S: 'static> AnyScreenHandler for ScreenHandler<S> {
     }
 }
 
-pub(crate) fn get_handlers() -> Vec<Box<dyn AnyScreenHandler>> {
-    vec![
-        Box::new(dashboard::dashboard_handler()),
-        Box::new(onboarding_wants_encryption::onboarding_wants_encryption_handler()),
-        Box::new(onboarding_wants_passphrase::onboarding_wants_passphrase_handler()),
-        Box::new(asking_passphrase::asking_passphrase_handler()),
-    ]
-}
+static HANDLERS: &[&dyn AnyScreenHandler] = &[
+    &dashboard::HANDLER,
+    &onboarding_wants_encryption::HANDLER,
+    &onboarding_wants_passphrase::HANDLER,
+    &asking_passphrase::HANDLER,
+];
 
 static EMPTY_HANDLER: ScreenHandler<()> = ScreenHandler {
     matches: |_| true,
-    get: |_| None,
+    get: |_| Some(&()),
     get_mut: |_| None,
-    render: |_, _, _| {},
+    render: |frame, _, _| {
+        let a = frame.area();
+
+        let (inner, area) = full_rect(a, "404 not found", "CTRL+C to exit");
+
+        frame.render_widget(inner, a);
+
+        let (top, bottom) = dual_vertical_rect(area);
+
+        render_logo(frame, top, LogoType::Simple);
+        let message =
+            Paragraph::new("This screen is not implemented yet :(").alignment(Alignment::Center);
+        frame.render_widget(message, bottom);
+    },
     handle_key: |_, _, _| None,
     handle_tick: |_, _| None,
 };
 
-pub(crate) fn get_handler_for_screen<'a>(
-    handlers: &'a [Box<dyn AnyScreenHandler>],
-    screen: &Screen,
-) -> &'a dyn AnyScreenHandler {
-    handlers
+pub(crate) fn get_handler_for_screen<'a>(screen: &Screen) -> &'a dyn AnyScreenHandler {
+    HANDLERS
         .iter()
+        .copied()
         .find(|h| h.matches(screen))
-        .map(|h| h.as_ref())
         .unwrap_or(&EMPTY_HANDLER)
 }

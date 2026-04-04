@@ -41,12 +41,10 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
     let tick_rate = Duration::from_millis(50);
     let key_rate = Duration::from_millis(250);
 
-    let handlers = screens::get_handlers();
-
     let mut last_tick_time = std::time::Instant::now();
 
     loop {
-        let handler = get_handler_for_screen(&handlers, &app.screen);
+        let handler = get_handler_for_screen(&app.screen);
 
         terminal.draw(|frame| handler.render(frame, app))?;
 

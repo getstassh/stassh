@@ -14,6 +14,11 @@ const LOGO_SM: &str = include_str!("../../../ascii-art-sm.txt");
 
 const CREDIT: &str = "Created by Lazar (bylazar.com)";
 
+pub(crate) enum LogoType {
+    Simple,
+    WithCredits,
+}
+
 struct ParsedLogo<'a> {
     split_col: usize,
     lines: Vec<&'a str>,
@@ -26,7 +31,7 @@ impl<'a> ParsedLogo<'a> {
     }
 }
 
-pub(crate) fn render_logo_with_credits(frame: &mut Frame, area: ratatui::layout::Rect) {
+pub(crate) fn render_logo(frame: &mut Frame, area: ratatui::layout::Rect, logo_type: LogoType) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -48,11 +53,11 @@ pub(crate) fn render_logo_with_credits(frame: &mut Frame, area: ratatui::layout:
         .iter()
         .find(|logo| logo.width <= padded_width && logo.height() <= padded_height)
     {
-        render_logo(frame, area, logo, padded_width, padded_height);
+        render_logo_size(frame, area, logo, padded_width, padded_height, logo_type);
         return;
     }
 
-    render_logo(frame, area, &xs, area_width, area_height);
+    render_logo_size(frame, area, &xs, area_width, area_height, logo_type);
 }
 
 fn parse_logo(raw: &str) -> ParsedLogo<'_> {
@@ -74,12 +79,13 @@ fn parse_logo(raw: &str) -> ParsedLogo<'_> {
     }
 }
 
-fn render_logo(
+fn render_logo_size(
     frame: &mut Frame,
     area: ratatui::layout::Rect,
     logo: &ParsedLogo,
     area_width: usize,
     area_height: usize,
+    logo_type: LogoType,
 ) {
     let white = hex_color(0xFFFFFF);
     let orange = hex_color(0xE77500);
@@ -93,7 +99,7 @@ fn render_logo(
         ]));
     }
 
-    if area_height >= logo.height() + 2 {
+    if area_height >= logo.height() + 2 && matches!(logo_type, LogoType::WithCredits) {
         if logo.height() > 1 {
             lines.insert(0, Line::from(Span::raw("")));
         }

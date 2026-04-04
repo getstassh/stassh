@@ -9,22 +9,21 @@ use crate::{
     ui::{centered_rect, dual_vertical_rect, full_rect, line_with_caret},
 };
 
-pub(crate) fn onboarding_wants_passphrase_handler() -> ScreenHandler<StringState> {
-    ScreenHandler {
-        matches: |s| matches!(s, Screen::OnboardingWantsPassphrase { .. }),
-        get: |s| match s {
-            Screen::OnboardingWantsPassphrase { state } => Some(state),
-            _ => None,
-        },
-        get_mut: |s| match s {
-            Screen::OnboardingWantsPassphrase { state } => Some(state),
-            _ => None,
-        },
-        render: ui,
-        handle_key: handle_key,
-        handle_tick: |_app, _| None,
-    }
-}
+pub(crate) static HANDLER: ScreenHandler<StringState> = ScreenHandler {
+    matches: |s| matches!(s, Screen::OnboardingWantsPassphrase { .. }),
+    get: |s| match s {
+        Screen::OnboardingWantsPassphrase { state } => Some(state),
+        _ => None,
+    },
+    get_mut: |s| match s {
+        Screen::OnboardingWantsPassphrase { state } => Some(state),
+        _ => None,
+    },
+    render: ui,
+    handle_key: handle_key,
+    handle_tick: |_app, _| None,
+};
+
 fn handle_key(_: &AppState, key_code: KeyCode, state: &mut StringState) -> Option<AppEffect> {
     let text = handle_text_input(state, key_code);
     if let Some(text) = text {
@@ -38,7 +37,7 @@ fn handle_key(_: &AppState, key_code: KeyCode, state: &mut StringState) -> Optio
                 panic!("Failed to load database with provided passphrase: {e}");
             }
 
-            app.screen = Screen::Dashboard;
+            app.go_to_dashboard();
         }));
     }
     None

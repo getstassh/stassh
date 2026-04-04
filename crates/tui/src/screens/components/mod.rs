@@ -1,3 +1,3 @@
 mod logo;
 
-pub(crate) use logo::render_logo_with_credits;
+pub(crate) use logo::{LogoType, render_logo};
