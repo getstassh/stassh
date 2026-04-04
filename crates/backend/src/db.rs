@@ -32,11 +32,21 @@ pub struct SshHost {
     pub auth: HostAuth,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct TrustedHostKey {
+    pub host: String,
+    pub port: u16,
+    pub algorithm: String,
+    pub public_key_base64: String,
+    pub fingerprint_sha256: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Database {
     pub version: &'static str,
     pub hosts: Vec<SshHost>,
     pub next_host_id: u32,
+    pub trusted_host_keys: Vec<TrustedHostKey>,
 }
 
 impl Database {
@@ -45,6 +55,7 @@ impl Database {
             version: LATEST_DB_VERSION,
             hosts: Vec::new(),
             next_host_id: 1,
+            trusted_host_keys: Vec::new(),
         }
     }
 }

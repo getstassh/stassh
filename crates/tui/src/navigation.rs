@@ -1,10 +1,46 @@
-#[derive(Debug, Clone, PartialEq)]
+use crate::ssh_client::{LiveSshSession, TrustChallenge};
+
 pub(crate) enum Screen {
     OnboardingWantsEncryption { state: YesNoState },
     OnboardingWantsPassphrase { state: StringState },
     OnboardingWantsTelemetry { state: YesNoState },
     AskingPassphrase { state: StringState },
     Dashboard { state: DashboardState },
+    SshSession { state: SshSessionState },
+}
+
+pub(crate) struct SshSessionState {
+    pub(crate) title: String,
+    pub(crate) parser: vt100::Parser,
+    pub(crate) phase: SshSessionPhase,
+}
+
+impl SshSessionState {
+    pub(crate) fn new_starting(title: String, rows: u16, cols: u16, host_id: u32) -> Self {
+        Self {
+            title,
+            parser: vt100::Parser::new(rows, cols, 10_000),
+            phase: SshSessionPhase::Starting { host_id },
+        }
+    }
+
+    pub(crate) fn resize(&mut self, rows: u16, cols: u16) {
+        self.parser.screen_mut().set_size(rows, cols);
+    }
+}
+
+pub(crate) enum SshSessionPhase {
+    Starting {
+        host_id: u32,
+    },
+    TrustPrompt {
+        host_id: u32,
+        challenge: TrustChallenge,
+    },
+    Running {
+        live: LiveSshSession,
+    },
+    Error(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -20,6 +56,7 @@ pub(crate) struct DashboardState {
     pub(crate) active_page: DashboardPage,
     pub(crate) selected_host: usize,
     pub(crate) host_modal: Option<HostModalState>,
+    pub(crate) last_status: Option<String>,
 }
 
 impl DashboardState {
@@ -28,6 +65,7 @@ impl DashboardState {
             active_page: DashboardPage::Home,
             selected_host: 0,
             host_modal: None,
+            last_status: None,
         }
     }
 }

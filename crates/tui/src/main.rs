@@ -17,6 +17,7 @@ mod app;
 mod inputs;
 mod navigation;
 mod screens;
+mod ssh_client;
 mod ui;
 
 fn main() -> Result<()> {
@@ -43,7 +44,7 @@ fn main() -> Result<()> {
 
 fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> Result<()> {
     let tick_rate = Duration::from_millis(50);
-    let key_rate = Duration::from_millis(250);
+    let key_rate = Duration::from_millis(16);
 
     let mut last_tick_time = std::time::Instant::now();
 
@@ -66,6 +67,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                             && key
                                 .modifiers
                                 .contains(crossterm::event::KeyModifiers::CONTROL)
+                            && !app.is_ssh_screen()
                         {
                             return Ok(());
                         }
@@ -75,6 +77,9 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                 }
                 Event::Paste(text) => {
                     handler.handle_paste(app, &text);
+                }
+                Event::Resize(cols, rows) => {
+                    handler.handle_resize(app, cols, rows);
                 }
                 _ => {}
             }

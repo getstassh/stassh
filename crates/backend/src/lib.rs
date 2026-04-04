@@ -4,7 +4,7 @@ mod db_crypto;
 mod migrations;
 
 pub use crate::config::Config;
-pub use crate::db::{Database, DbEncryption, HostAuth, SshHost};
+pub use crate::db::{Database, DbEncryption, HostAuth, SshHost, TrustedHostKey};
 
 use crate::db::{load_db, save_db};
 

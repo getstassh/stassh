@@ -30,6 +30,7 @@ pub(crate) static HANDLER: ScreenHandler<StringState> = ScreenHandler {
     render: ui,
     handle_key: handle_key,
     handle_paste: handle_paste,
+    handle_resize: |_, _, _, _| None,
     handle_tick: |_app, _| None,
 };
 

@@ -10,7 +10,7 @@ use ratatui::{
 use crate::{
     navigation::{
         DashboardPage, DashboardState, HostAuthMode, HostFormField, HostFormState, HostModalMode,
-        HostModalState, Screen,
+        HostModalState, Screen, SshSessionState,
     },
     screens::{AppEffect, ScreenHandler},
     ui::full_rect,
@@ -32,6 +32,7 @@ pub(crate) static HANDLER: ScreenHandler<DashboardState> = ScreenHandler {
     render: ui,
     handle_key,
     handle_paste,
+    handle_resize: |_, _, _, _| None,
     handle_tick: |_app, _| None,
 };
 
@@ -104,8 +105,15 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
             state.selected_host = move_down(state.selected_host, app.db.hosts.len());
         }
         KeyCode::Enter | KeyCode::Char('c') => {
-            if app.db.hosts.get(state.selected_host).is_some() {
-                return None;
+            if let Some(host) = app.db.hosts.get(state.selected_host) {
+                let host_id = host.id;
+                let title = format!("{}@{}:{}", host.user, host.host, host.port);
+                return Some(Box::new(move |app| {
+                    let (cols, rows) = crossterm::terminal::size().unwrap_or((120, 40));
+                    app.screen = Screen::SshSession {
+                        state: SshSessionState::new_starting(title, rows, cols, host_id),
+                    };
+                }));
             }
         }
         _ => {}
@@ -530,13 +538,31 @@ fn render_sidebar_item(
 
 fn render_home(frame: &mut Frame, area: Rect, app: &AppState, state: &DashboardState) {
     if app.db.hosts.is_empty() {
-        let empty = Paragraph::new(
-            "No hosts yet.\n\nPress A to create your first SSH host.\nUse 1-4 to change pages.",
-        )
-        .alignment(Alignment::Left);
+        let message = if let Some(status) = &state.last_status {
+            format!(
+                "No hosts yet.\n\nPress A to create your first SSH host.\n\nLast status: {status}"
+            )
+        } else {
+            "No hosts yet.\n\nPress A to create your first SSH host.".to_string()
+        };
+        let empty = Paragraph::new(message).alignment(Alignment::Left);
         frame.render_widget(empty, area);
         return;
     }
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(0)])
+        .split(area);
+
+    let header = if let Some(status) = &state.last_status {
+        format!("Last status: {status}")
+    } else {
+        "Ready to connect.".to_string()
+    };
+    frame.render_widget(Paragraph::new(header), layout[0]);
+
+    let grid_area = layout[1];
 
     let columns = HOME_GRID_COLUMNS.min(app.db.hosts.len().max(1));
     let rows = app.db.hosts.len().div_ceil(columns);
@@ -546,7 +572,7 @@ fn render_home(frame: &mut Frame, area: Rect, app: &AppState, state: &DashboardS
     let row_areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints(row_constraints)
-        .split(area);
+        .split(grid_area);
 
     for (row_idx, row_area) in row_areas.iter().take(rows).enumerate() {
         let column_areas = Layout::default()

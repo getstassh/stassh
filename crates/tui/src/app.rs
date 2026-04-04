@@ -50,6 +50,10 @@ impl App {
             state: DashboardState::new(),
         };
     }
+
+    pub(crate) fn is_ssh_screen(&self) -> bool {
+        matches!(self.screen, Screen::SshSession { .. })
+    }
 }
 
 impl Deref for App {

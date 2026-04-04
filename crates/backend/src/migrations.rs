@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::db::{Database, SshHost};
+use crate::db::{Database, SshHost, TrustedHostKey};
 
-pub(crate) const LATEST_DB_VERSION: &str = "2";
+pub(crate) const LATEST_DB_VERSION: &str = "3";
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "version")]
@@ -23,6 +23,13 @@ enum DatabaseAny {
         hosts: Vec<SshHost>,
         next_host_id: u32,
     },
+
+    #[serde(rename = "3")]
+    V3 {
+        hosts: Vec<SshHost>,
+        next_host_id: u32,
+        trusted_host_keys: Vec<TrustedHostKey>,
+    },
 }
 
 impl DatabaseAny {
@@ -37,19 +44,30 @@ impl DatabaseAny {
                 next_host_id: (*index).max(1),
             }),
 
-            Self::V2 { .. } => None,
+            Self::V2 {
+                hosts,
+                next_host_id,
+            } => Some(Self::V3 {
+                hosts: hosts.clone(),
+                next_host_id: (*next_host_id).max(1),
+                trusted_host_keys: Vec::new(),
+            }),
+
+            Self::V3 { .. } => None,
         }
     }
 
     fn into_latest(self) -> Database {
         match self {
-            Self::V2 {
+            Self::V3 {
                 hosts,
                 next_host_id,
+                trusted_host_keys,
             } => Database {
-                version: "2",
+                version: "3",
                 hosts,
                 next_host_id: next_host_id.max(1),
+                trusted_host_keys,
             },
 
             _ => unreachable!("database was not fully migrated"),
