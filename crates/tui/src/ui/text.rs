@@ -3,7 +3,10 @@ use ratatui::{
     text::{Line, Span},
 };
 
-pub fn line_with_caret(text: &str, caret: usize, caret_on: bool) -> Line<'static> {
+pub fn line_with_caret(state: &backend::StringState) -> Line<'static> {
+    let text = &state.text;
+    let caret = state.caret_position;
+
     let before = text[..caret].to_string();
     let current = text[caret..].chars().next().unwrap_or(' ');
     let after = if caret < text.len() {
@@ -11,9 +14,7 @@ pub fn line_with_caret(text: &str, caret: usize, caret_on: bool) -> Line<'static
     } else {
         String::new()
     };
-    if !caret_on {
-        return Line::from(text.to_string());
-    }
+
     Line::from(vec![
         Span::raw(before),
         Span::styled(

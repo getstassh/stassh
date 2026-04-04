@@ -58,7 +58,7 @@ impl StringState {
     pub fn toggle_visibility(&mut self) {
         self.is_visible = !self.is_visible;
     }
-    pub fn visible_text(&mut self) -> String {
+    pub fn visible_text(self) -> String {
         let text = if self.is_visible {
             self.text.clone()
         } else {

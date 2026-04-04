@@ -149,18 +149,18 @@ fn run_app(
     }
 }
 
-fn ui(frame: &mut Frame, app: &mut AppState) {
+fn ui(frame: &mut Frame, app: &AppState) {
     match &app.screen {
         backend::Screen::LoadingLogo => ui_loading_logo(frame, app),
         backend::Screen::OnboardingWantsEncryption { state } => {
             ui_onboarding_wants_encryption(frame, app, state)
         }
         backend::Screen::OnboardingWantsPassphrase { state } => {
-            let mut s = state.clone();
-            ui_onboarding_wants_passphrase(frame, app, &mut s);
-            app.set_screen(backend::Screen::OnboardingWantsPassphrase { state: s });
+            ui_onboarding_wants_passphrase(frame, app, &state);
         }
-        backend::Screen::AskingPassphrase { .. } => ui_asking_passphrase(frame, app),
+        backend::Screen::AskingPassphrase { state } => {
+            ui_asking_passphrase(frame, app, &state);
+        }
         backend::Screen::Dashboard => ui_dashboard(frame, app),
     }
 }
@@ -193,7 +193,7 @@ fn ui_onboarding_wants_encryption(frame: &mut Frame, _app: &AppState, state: &ba
 fn ui_onboarding_wants_passphrase(
     frame: &mut Frame,
     _app: &AppState,
-    state: &mut backend::StringState,
+    state: &backend::StringState,
 ) {
     let a = frame.area();
 
@@ -210,21 +210,28 @@ fn ui_onboarding_wants_passphrase(
     frame.render_widget(question, top);
     let (text_box, text_box_area, text_area) = centered_rect(50, 3, bottom);
     frame.render_widget(text_box, text_box_area);
-    let passphrase = Paragraph::new(line_with_caret(
-        &state.visible_text(),
-        state.caret_position,
-        true,
-    ))
-    .alignment(Alignment::Left);
+    let passphrase = Paragraph::new(line_with_caret(state)).alignment(Alignment::Left);
     frame.render_widget(passphrase, text_area);
 }
 
-fn ui_asking_passphrase(frame: &mut Frame, app: &AppState) {
-    let size = frame.area();
-    let block = Block::default()
-        .style(Style::default().bg(Color::Yellow))
-        .title("Enter your passphrase to unlock your database:");
-    frame.render_widget(block, size);
+fn ui_asking_passphrase(frame: &mut Frame, _app: &AppState, state: &backend::StringState) {
+    let a = frame.area();
+
+    let (inner, area) = full_rect(
+        a,
+        "Enter Passphrase",
+        "Use ←/→ or Tab to switch, Enter to confirm, type your passphrase",
+    );
+
+    frame.render_widget(inner, a);
+
+    let question = Paragraph::new("Enter your passphrase:").alignment(Alignment::Center);
+    let (top, bottom) = dual_vertical_rect(area);
+    frame.render_widget(question, top);
+    let (text_box, text_box_area, text_area) = centered_rect(50, 3, bottom);
+    frame.render_widget(text_box, text_box_area);
+    let passphrase = Paragraph::new(line_with_caret(state)).alignment(Alignment::Left);
+    frame.render_widget(passphrase, text_area);
 }
 
 fn ui_loading_logo(frame: &mut Frame, app: &AppState) {

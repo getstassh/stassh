@@ -22,7 +22,6 @@ impl Config {
     }
 
     pub fn load_config() -> Self {
-        delete_config().ok();
         load_config().unwrap_or_else(|_| Self::default())
     }
 
