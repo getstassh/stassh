@@ -1,58 +1,71 @@
-use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::db::Database;
+use crate::db::{Database, SshHost};
 
-pub(crate) const LATEST_DB_VERSION: u32 = 1;
+pub(crate) const LATEST_DB_VERSION: &str = "2";
 
-#[derive(Debug, Deserialize)]
-struct DatabaseV0 {
-    name: Option<String>,
-    index: Option<u32>,
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "version")]
+enum DatabaseAny {
+    #[serde(rename = "0")]
+    V0 {
+        name: Option<String>,
+        index: Option<u32>,
+    },
+
+    #[serde(rename = "1")]
+    V1 { index: u32 },
+
+    #[serde(rename = "2")]
+    V2 {
+        hosts: Vec<SshHost>,
+        next_host_id: u32,
+    },
 }
 
-#[derive(Debug, Deserialize)]
-struct DatabaseV1 {
-    index: u32,
-}
+impl DatabaseAny {
+    fn upgrade_one(&self) -> Option<Self> {
+        match self {
+            Self::V0 { index, .. } => Some(Self::V1 {
+                index: (*index).unwrap_or(0),
+            }),
 
-pub(crate) fn migrate_db_value(value: Value) -> Result<(Database, bool)> {
-    let mut changed = false;
-    let mut current_value = value;
-    let mut current_version = parse_version(&current_value).unwrap_or(0);
+            Self::V1 { index } => Some(Self::V2 {
+                hosts: Vec::new(),
+                next_host_id: (*index).max(1),
+            }),
 
-    loop {
-        match current_version {
-            0 => {
-                let v0: DatabaseV0 = serde_json::from_value(current_value)
-                    .context("failed to parse v0 database payload")?;
-                let next = Database {
-                    version: 1,
-                    index: v0.index.unwrap_or(0),
-                };
-                current_value =
-                    serde_json::to_value(&next).context("failed to serialize migrated v1 DB")?;
-                current_version = 1;
-                changed = true;
-            }
-            1 => {
-                let v1: DatabaseV1 = serde_json::from_value(current_value)
-                    .context("failed to parse v1 database payload")?;
-                let next = Database {
-                    version: 1,
-                    index: v1.index,
-                };
-                return Ok((next, changed));
-            }
-            version => bail!("unsupported database version {version}"),
+            Self::V2 { .. } => None,
+        }
+    }
+
+    fn into_latest(self) -> Database {
+        match self {
+            Self::V2 {
+                hosts,
+                next_host_id,
+            } => Database {
+                version: "2",
+                hosts,
+                next_host_id: next_host_id.max(1),
+            },
+
+            _ => unreachable!("database was not fully migrated"),
         }
     }
 }
 
-fn parse_version(value: &Value) -> Option<u32> {
-    value
-        .get("version")
-        .and_then(Value::as_u64)
-        .and_then(|n| u32::try_from(n).ok())
+pub(crate) fn migrate_db_value(value: Value) -> Result<(Database, bool)> {
+    let mut db: DatabaseAny = serde_json::from_value(value).context("failed to parse database")?;
+
+    let mut changed = false;
+
+    while let Some(next) = db.upgrade_one() {
+        db = next;
+        changed = true;
+    }
+
+    Ok((db.into_latest(), changed))
 }

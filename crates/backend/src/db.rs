@@ -15,17 +15,36 @@ pub enum DbEncryption {
     Passphrase,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HostAuth {
+    Key { key_path: String },
+    Password { password: String },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct SshHost {
+    pub id: u32,
+    pub name: String,
+    pub host: String,
+    pub user: String,
+    pub port: u16,
+    pub auth: HostAuth,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Database {
-    pub version: u32,
-    pub index: u32,
+    pub version: &'static str,
+    pub hosts: Vec<SshHost>,
+    pub next_host_id: u32,
 }
 
 impl Database {
     pub(crate) fn default() -> Self {
         Self {
             version: LATEST_DB_VERSION,
-            index: 0,
+            hosts: Vec::new(),
+            next_host_id: 1,
         }
     }
 }

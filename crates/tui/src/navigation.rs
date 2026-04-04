@@ -15,25 +15,102 @@ pub(crate) enum DashboardPage {
     Credits,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum DashboardFocus {
-    Nav,
-    Content,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DashboardState {
     pub(crate) active_page: DashboardPage,
-    pub(crate) focus: DashboardFocus,
+    pub(crate) selected_host: usize,
+    pub(crate) host_modal: Option<HostModalState>,
 }
 
 impl DashboardState {
     pub(crate) fn new() -> Self {
         Self {
             active_page: DashboardPage::Home,
-            focus: DashboardFocus::Nav,
+            selected_host: 0,
+            host_modal: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum HostModalMode {
+    Create,
+    Edit { host_id: u32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum HostAuthMode {
+    Key,
+    Password,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum HostFormField {
+    Name,
+    Host,
+    User,
+    Port,
+    AuthMode,
+    AuthValue,
+}
+
+impl HostFormField {
+    pub(crate) fn next(self) -> Self {
+        match self {
+            Self::Name => Self::Host,
+            Self::Host => Self::User,
+            Self::User => Self::Port,
+            Self::Port => Self::AuthMode,
+            Self::AuthMode => Self::AuthValue,
+            Self::AuthValue => Self::Name,
+        }
+    }
+
+    pub(crate) fn prev(self) -> Self {
+        match self {
+            Self::Name => Self::AuthValue,
+            Self::Host => Self::Name,
+            Self::User => Self::Host,
+            Self::Port => Self::User,
+            Self::AuthMode => Self::Port,
+            Self::AuthValue => Self::AuthMode,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HostFormState {
+    pub(crate) focus: HostFormField,
+    pub(crate) name: String,
+    pub(crate) host: String,
+    pub(crate) user: String,
+    pub(crate) port: String,
+    pub(crate) auth_mode: HostAuthMode,
+    pub(crate) key_path: String,
+    pub(crate) password: String,
+    pub(crate) error: Option<String>,
+}
+
+impl HostFormState {
+    pub(crate) fn new() -> Self {
+        Self {
+            focus: HostFormField::Name,
+            name: String::new(),
+            host: String::new(),
+            user: String::new(),
+            port: String::from("22"),
+            auth_mode: HostAuthMode::Key,
+            key_path: String::new(),
+            password: String::new(),
+            error: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HostModalState {
+    pub(crate) mode: HostModalMode,
+    pub(crate) form: HostFormState,
 }
 
 #[derive(Debug, Clone, PartialEq)]
