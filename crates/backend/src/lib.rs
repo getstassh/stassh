@@ -4,7 +4,7 @@ mod screen;
 
 pub use crate::config::Config;
 pub use crate::db::{Database, DbEncryption};
-pub use crate::screen::Screen;
+pub use crate::screen::{Screen, StringState, YesNoState};
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -23,7 +23,9 @@ impl AppState {
         let mut default_screen = Screen::LoadingLogo;
         match config.db_encryption {
             None => {
-                default_screen = Screen::OnboardingWantsEncryption;
+                default_screen = Screen::OnboardingWantsEncryption {
+                    state: YesNoState::new(),
+                };
                 // ask user if they want to encrypt the db, if yes, ask for passphrase and create new db with encryption
                 // if no, create new db without encryption
             }
@@ -32,7 +34,9 @@ impl AppState {
                 // load db without encryption
             }
             Some(DbEncryption::Passphrase) => {
-                default_screen = Screen::AskingPassphrase;
+                default_screen = Screen::AskingPassphrase {
+                    passphrase: StringState::new(),
+                };
                 // ask for passphrase, load db with encryption
             }
         }

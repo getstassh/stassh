@@ -22,7 +22,15 @@ impl Config {
     }
 
     pub fn load_config() -> Self {
-        load_config().unwrap_or_else(|e| Self::default())
+        delete_config().ok();
+        load_config().unwrap_or_else(|_| Self::default())
+    }
+
+    pub fn save_config(&self) -> Result<()> {
+        let path = config_path()?;
+        let text = serde_json::to_string_pretty(self)?;
+        fs::write(path, text)?;
+        Ok(())
     }
 }
 
@@ -36,6 +44,14 @@ fn config_path() -> Result<PathBuf> {
     let dir = dirs.config_dir();
     fs::create_dir_all(dir)?;
     Ok(dir.join("config.json"))
+}
+
+pub fn delete_config() -> Result<()> {
+    let path = config_path()?;
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
 }
 
 pub fn load_config() -> Result<Config> {
