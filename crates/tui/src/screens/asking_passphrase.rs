@@ -92,7 +92,7 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &backend::StringState) {
 fn render_logo_with_credits(frame: &mut Frame, area: Rect) {
     const WHITE_HEX: u32 = 0xFFFFFF;
     const ORANGE_HEX: u32 = 0xE77500;
-    const SPLIT_COL: usize = 50;
+    const SPLIT_COL: usize = 44;
 
     let white = hex_color(WHITE_HEX);
     let orange = hex_color(ORANGE_HEX);
