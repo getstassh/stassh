@@ -11,19 +11,22 @@ pub use crate::screen::{Screen, StringState, YesNoState};
 use anyhow::Result;
 
 #[derive(Debug, Clone)]
+pub struct App {
+    pub screen: Screen,
+    pub state: AppState,
+}
+
+#[derive(Debug, Clone)]
 pub struct AppState {
     pub app_name: String,
-    pub started_timestamp: std::time::SystemTime,
-    pub should_quit: bool,
 
-    pub screen: Screen,
     pub config: Config,
     pub db: Database,
 
     pub password: Option<String>,
 }
 
-impl AppState {
+impl App {
     pub fn new(config: Config) -> Self {
         let mut db = Database::default();
         let screen = match config.db_encryption {
@@ -40,22 +43,14 @@ impl AppState {
         };
 
         Self {
-            app_name: "stassh".to_string(),
-            started_timestamp: Self::get_timestamp(),
-            should_quit: false,
             screen,
-            config,
-            db,
-            password: None,
+            state: AppState {
+                app_name: "Stassh".to_string(),
+                config,
+                db,
+                password: None,
+            },
         }
-    }
-
-    pub fn get_timestamp() -> std::time::SystemTime {
-        std::time::SystemTime::now()
-    }
-
-    pub fn time_since_start(&self) -> std::time::Duration {
-        self.started_timestamp.elapsed().unwrap_or_default()
     }
 
     pub fn set_screen(&mut self, screen: Screen) {
@@ -63,15 +58,33 @@ impl AppState {
     }
 
     pub fn app_name(&self) -> &str {
-        &self.app_name
+        &self.state.app_name
     }
 
-    pub fn should_quit(&self) -> bool {
-        self.should_quit
+    pub fn load_db(&mut self) -> Result<()> {
+        let encryption = self
+            .state
+            .config
+            .db_encryption
+            .clone()
+            .unwrap_or(DbEncryption::None);
+        self.state.db = load_db(encryption, self.state.password.as_deref())?;
+        Ok(())
     }
 
-    pub fn request_quit(&mut self) {
-        self.should_quit = true;
+    pub fn save_db(&self) -> Result<()> {
+        let encryption = self
+            .state
+            .config
+            .db_encryption
+            .clone()
+            .unwrap_or(DbEncryption::None);
+        save_db(&self.state.db, encryption, self.state.password.as_deref())?;
+        Ok(())
+    }
+
+    pub fn save_config(&self) -> Result<()> {
+        self.state.config.save_config()
     }
 
     pub fn delete_data(&mut self) -> Result<()> {

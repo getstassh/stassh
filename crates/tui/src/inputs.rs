@@ -13,7 +13,7 @@ pub fn handle_yes_no_input(state: &mut backend::YesNoState, key_code: KeyCode) -
     }
 }
 
-pub fn handle_text_input(state: &mut backend::StringState, key_code: KeyCode) -> Option<String> {
+pub fn handle_text_input(state: &mut backend::StringState, key_code: KeyCode) -> Option<&str> {
     match key_code {
         KeyCode::Char(c) => {
             let mut text = state.text.clone();
@@ -31,7 +31,7 @@ pub fn handle_text_input(state: &mut backend::StringState, key_code: KeyCode) ->
             }
             None
         }
-        KeyCode::Enter => Some(state.text.clone()),
+        KeyCode::Enter => Some(state.text.as_str()),
         KeyCode::Left => {
             if state.caret_position > 0 {
                 state.caret_position -= 1;

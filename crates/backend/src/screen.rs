@@ -6,6 +6,24 @@ pub enum Screen {
     Dashboard,
 }
 
+impl Screen {
+    pub fn is_onboarding_wants_encryption(&self) -> bool {
+        matches!(self, Screen::OnboardingWantsEncryption { .. })
+    }
+
+    pub fn is_onboarding_wants_passphrase(&self) -> bool {
+        matches!(self, Screen::OnboardingWantsPassphrase { .. })
+    }
+
+    pub fn is_asking_passphrase(&self) -> bool {
+        matches!(self, Screen::AskingPassphrase { .. })
+    }
+
+    pub fn is_dashboard(&self) -> bool {
+        matches!(self, Screen::Dashboard)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct YesNoState {
     pub selected: bool,
