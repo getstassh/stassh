@@ -15,6 +15,8 @@ pub(crate) struct SshSessionState {
     pub(crate) title: String,
     pub(crate) parser: vt100::Parser,
     pub(crate) phase: SshSessionPhase,
+    pub(crate) last_good_rows: u16,
+    pub(crate) last_good_cols: u16,
 }
 
 impl SshSessionState {
@@ -23,10 +25,14 @@ impl SshSessionState {
             title,
             parser: vt100::Parser::new(rows, cols, 10_000),
             phase: SshSessionPhase::starting(host_id),
+            last_good_rows: rows.max(1),
+            last_good_cols: cols.max(1),
         }
     }
 
     pub(crate) fn resize(&mut self, rows: u16, cols: u16) {
+        self.last_good_rows = rows.max(1);
+        self.last_good_cols = cols.max(1);
         self.parser.screen_mut().set_size(rows, cols);
     }
 }

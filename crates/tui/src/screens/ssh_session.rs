@@ -93,9 +93,16 @@ fn handle_resize(
     rows: u16,
     state: &mut SshSessionState,
 ) -> Option<AppEffect> {
+    if cols == 0 || rows == 0 {
+        return None;
+    }
+
     state.resize(rows, cols);
     if let SshSessionPhase::Running { live } = &state.phase {
-        live.send_input(SessionInput::Resize { cols, rows });
+        live.send_input(SessionInput::Resize {
+            cols: cols.max(1),
+            rows: rows.max(1),
+        });
     }
     None
 }
@@ -119,7 +126,12 @@ fn handle_tick(app: &AppState, state: &mut SshSessionState) -> Option<AppEffect>
                     ));
                 };
 
-                *pending = Some(start_session_async(&host, &app.db.trusted_host_keys));
+                *pending = Some(start_session_async(
+                    &host,
+                    &app.db.trusted_host_keys,
+                    state.last_good_rows,
+                    state.last_good_cols,
+                ));
             }
 
             let Some(pending_start) = pending.as_mut() else {

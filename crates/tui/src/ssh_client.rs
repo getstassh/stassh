@@ -200,6 +200,8 @@ impl client::Handler for VerifyHandler {
 pub(crate) fn start_session_async(
     host: &SshHost,
     trusted_host_keys: &[TrustedHostKey],
+    rows: u16,
+    cols: u16,
 ) -> PendingSshStart {
     let (input_tx, input_rx) = tokio_mpsc::unbounded_channel::<SessionInput>();
     let (event_tx, event_rx) = mpsc::channel::<SessionEvent>();
@@ -232,6 +234,8 @@ pub(crate) fn start_session_async(
             connect_and_run(
                 host,
                 trusted_host_keys,
+                rows,
+                cols,
                 input_rx,
                 event_for_connect,
                 shared_for_connect,
@@ -268,6 +272,8 @@ pub(crate) fn start_session_async(
 async fn connect_and_run(
     host: SshHost,
     trusted_host_keys: Vec<TrustedHostKey>,
+    rows: u16,
+    cols: u16,
     mut input_rx: tokio_mpsc::UnboundedReceiver<SessionInput>,
     event_tx: mpsc::Sender<SessionEvent>,
     shared: Arc<Mutex<SharedVerificationState>>,
@@ -329,7 +335,7 @@ async fn connect_and_run(
         .await
         .context("failed to open SSH session channel")?;
 
-    let (cols, rows) = crossterm::terminal::size().unwrap_or((120, 40));
+    let (cols, rows) = (cols.max(1), rows.max(1));
     channel
         .request_pty(
             true,

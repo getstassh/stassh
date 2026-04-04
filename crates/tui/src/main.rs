@@ -4,7 +4,10 @@ use std::time::Duration;
 use anyhow::Result;
 
 use crossterm::{
-    event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind},
+    event::{
+        self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
+        Event, KeyCode, KeyEventKind,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -23,7 +26,12 @@ mod ui;
 fn main() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableBracketedPaste,
+        EnableFocusChange
+    )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -34,6 +42,7 @@ fn main() -> Result<()> {
     execute!(
         terminal.backend_mut(),
         DisableBracketedPaste,
+        DisableFocusChange,
         LeaveAlternateScreen
     )?;
     terminal.show_cursor()?;
@@ -79,7 +88,16 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                     handler.handle_paste(app, &text);
                 }
                 Event::Resize(cols, rows) => {
-                    handler.handle_resize(app, cols, rows);
+                    if cols > 0 && rows > 0 {
+                        handler.handle_resize(app, cols, rows);
+                    }
+                }
+                Event::FocusGained => {
+                    if let Ok((cols, rows)) = crossterm::terminal::size() {
+                        if cols > 0 && rows > 0 {
+                            handler.handle_resize(app, cols, rows);
+                        }
+                    }
                 }
                 _ => {}
             }
