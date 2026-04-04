@@ -11,6 +11,7 @@ use crate::db::DbEncryption;
 pub struct Config {
     pub enable_telemetry: Option<bool>,
     pub db_encryption: Option<DbEncryption>,
+    pub show_sidebar: bool,
 }
 
 impl Config {
@@ -18,6 +19,7 @@ impl Config {
         Self {
             enable_telemetry: None,
             db_encryption: None,
+            show_sidebar: true,
         }
     }
 

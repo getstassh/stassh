@@ -1,5 +1,5 @@
 use backend::AppState;
-use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
 use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
 
 use crate::{
@@ -24,8 +24,8 @@ pub(crate) static HANDLER: ScreenHandler<YesNoState> = ScreenHandler {
     handle_tick: |_app, _| None,
 };
 
-fn handle_key(_: &AppState, key_code: KeyCode, state: &mut YesNoState) -> Option<AppEffect> {
-    let result = handle_yes_no_input(state, key_code);
+fn handle_key(_: &AppState, key: KeyEvent, state: &mut YesNoState) -> Option<AppEffect> {
+    let result = handle_yes_no_input(state, key.code);
     if let Some(result) = result {
         return Some(Box::new(move |app| {
             if result {

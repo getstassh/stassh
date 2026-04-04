@@ -1,5 +1,5 @@
 use backend::AppState;
-use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
 use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
 
 use crate::{
@@ -23,14 +23,14 @@ struct ScreenHandler<S> {
     get: fn(&Screen) -> Option<&S>,
     get_mut: fn(&mut Screen) -> Option<&mut S>,
     render: fn(&mut Frame, &AppState, &S),
-    handle_key: fn(&AppState, KeyCode, &mut S) -> Option<AppEffect>,
+    handle_key: fn(&AppState, KeyEvent, &mut S) -> Option<AppEffect>,
     handle_tick: fn(&AppState, &mut S) -> Option<AppEffect>,
 }
 
 pub(crate) trait AnyScreenHandler: Sync {
     fn matches(&self, screen: &Screen) -> bool;
     fn render(&self, frame: &mut Frame, app: &App);
-    fn handle_key(&self, app: &mut App, key: KeyCode);
+    fn handle_key(&self, app: &mut App, key: KeyEvent);
     fn handle_tick(&self, app: &mut App);
 }
 
@@ -45,7 +45,7 @@ impl<S: 'static> AnyScreenHandler for ScreenHandler<S> {
         }
     }
 
-    fn handle_key(&self, app: &mut App, key: KeyCode) {
+    fn handle_key(&self, app: &mut App, key: KeyEvent) {
         let effect = {
             let (app_state, screen) = app.state_and_screen_mut();
 

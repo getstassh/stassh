@@ -15,15 +15,23 @@ pub(crate) enum DashboardPage {
     Credits,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum DashboardFocus {
+    Nav,
+    Content,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DashboardState {
     pub(crate) active_page: DashboardPage,
+    pub(crate) focus: DashboardFocus,
 }
 
 impl DashboardState {
     pub(crate) fn new() -> Self {
         Self {
             active_page: DashboardPage::Home,
+            focus: DashboardFocus::Nav,
         }
     }
 }

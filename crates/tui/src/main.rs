@@ -56,9 +56,8 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
 
         if event::poll(key_rate)? {
             if let Event::Key(key) = event::read()? {
-                let key_code = key.code;
                 if key.kind == KeyEventKind::Press {
-                    if key_code == KeyCode::Char('c')
+                    if key.code == KeyCode::Char('c')
                         && key
                             .modifiers
                             .contains(crossterm::event::KeyModifiers::CONTROL)
@@ -66,7 +65,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                         return Ok(());
                     }
 
-                    handler.handle_key(app, key_code);
+                    handler.handle_key(app, key);
                 }
             }
         }
