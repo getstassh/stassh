@@ -1,6 +1,8 @@
-use backend::{App, AppState, Screen};
+use backend::AppState;
 use crossterm::event::KeyCode;
 use ratatui::Frame;
+
+use crate::{app::App, navigation::Screen};
 
 mod asking_passphrase;
 mod dashboard;
@@ -32,14 +34,13 @@ impl<S: 'static> AnyScreenHandler for ScreenHandler<S> {
 
     fn render(&self, frame: &mut Frame, app: &App) {
         if let Some(state) = (self.get)(&app.screen) {
-            (self.render)(frame, &app.state, state);
+            (self.render)(frame, app.state(), state);
         }
     }
 
     fn handle_key(&self, app: &mut App, key: KeyCode) {
         let effect = {
-            let app_state = &app.state;
-            let screen = &mut app.screen;
+            let (app_state, screen) = app.state_and_screen_mut();
 
             if let Some(state) = (self.get_mut)(screen) {
                 (self.handle_key)(app_state, key, state)
@@ -55,8 +56,7 @@ impl<S: 'static> AnyScreenHandler for ScreenHandler<S> {
 
     fn handle_tick(&self, app: &mut App) {
         let effect = {
-            let app_state = &app.state;
-            let screen = &mut app.screen;
+            let (app_state, screen) = app.state_and_screen_mut();
 
             if let Some(state) = (self.get_mut)(screen) {
                 (self.handle_tick)(app_state, state)

@@ -6,24 +6,6 @@ pub enum Screen {
     Dashboard,
 }
 
-impl Screen {
-    pub fn is_onboarding_wants_encryption(&self) -> bool {
-        matches!(self, Screen::OnboardingWantsEncryption { .. })
-    }
-
-    pub fn is_onboarding_wants_passphrase(&self) -> bool {
-        matches!(self, Screen::OnboardingWantsPassphrase { .. })
-    }
-
-    pub fn is_asking_passphrase(&self) -> bool {
-        matches!(self, Screen::AskingPassphrase { .. })
-    }
-
-    pub fn is_dashboard(&self) -> bool {
-        matches!(self, Screen::Dashboard)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct YesNoState {
     pub selected: bool,
@@ -33,15 +15,15 @@ impl YesNoState {
     pub fn new() -> Self {
         Self { selected: true }
     }
+
     pub fn toggle(&mut self) {
         self.selected = !self.selected;
     }
-    pub fn set(&mut self, value: bool) {
-        self.selected = value;
-    }
+
     pub fn is_yes(&self) -> bool {
         self.selected
     }
+
     pub fn is_no(&self) -> bool {
         !self.selected
     }
@@ -55,13 +37,6 @@ pub struct StringState {
 }
 
 impl StringState {
-    pub fn visible() -> Self {
-        Self {
-            is_visible: true,
-            text: String::new(),
-            caret_position: 0,
-        }
-    }
     pub fn invisible() -> Self {
         Self {
             is_visible: false,
@@ -69,13 +44,12 @@ impl StringState {
             caret_position: 0,
         }
     }
+
     pub fn set_text(&mut self, text: String) {
         self.text = text;
     }
-    pub fn toggle_visibility(&mut self) {
-        self.is_visible = !self.is_visible;
-    }
-    pub fn visible_text(self) -> String {
+
+    pub fn visible_text(&self) -> String {
         let text = if self.is_visible {
             self.text.clone()
         } else {

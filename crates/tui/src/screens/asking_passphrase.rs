@@ -11,45 +11,42 @@ use ratatui::{
 
 use crate::{
     inputs::handle_text_input,
+    navigation::{Screen, StringState},
     screens::AppEffect,
     ui::{centered_rect, full_rect, line_with_caret},
 };
 
 use crate::screens::ScreenHandler;
 
-pub fn asking_passphrase_handler() -> ScreenHandler<backend::StringState> {
+pub fn asking_passphrase_handler() -> ScreenHandler<StringState> {
     ScreenHandler {
-        matches: backend::Screen::is_asking_passphrase,
+        matches: |s| matches!(s, Screen::AskingPassphrase { .. }),
         get: |s| match s {
-            backend::Screen::AskingPassphrase { state } => Some(state),
+            Screen::AskingPassphrase { state } => Some(state),
             _ => None,
         },
         get_mut: |s| match s {
-            backend::Screen::AskingPassphrase { state } => Some(state),
+            Screen::AskingPassphrase { state } => Some(state),
             _ => None,
         },
         render: ui,
         handle_key: handle_key,
-        handle_tick: |app, _| None,
+        handle_tick: |_app, _| None,
     }
 }
 
-fn handle_key(
-    _: &AppState,
-    key_code: KeyCode,
-    state: &mut backend::StringState,
-) -> Option<AppEffect> {
+fn handle_key(_: &AppState, key_code: KeyCode, state: &mut StringState) -> Option<AppEffect> {
     let text = handle_text_input(state, key_code);
     if let Some(text) = text {
         let text = text.to_string();
         return Some(Box::new(move |app| {
-            app.state.password = Some(text);
+            app.password = Some(text);
             let result = app.load_db();
             if let Err(e) = result {
                 panic!("Failed to load database with provided passphrase: {e}");
             }
 
-            app.screen = backend::Screen::Dashboard;
+            app.screen = Screen::Dashboard;
         }));
     }
     None
@@ -57,7 +54,7 @@ fn handle_key(
 
 const ASCII_ART: &str = include_str!("../../ascii-art.txt");
 
-fn ui(frame: &mut Frame, _app: &AppState, state: &backend::StringState) {
+fn ui(frame: &mut Frame, _app: &AppState, state: &StringState) {
     let a = frame.area();
 
     let (inner, area) = full_rect(

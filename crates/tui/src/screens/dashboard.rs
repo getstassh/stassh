@@ -6,35 +6,36 @@ use ratatui::{
 };
 
 use crate::{
+    navigation::Screen,
     screens::{AppEffect, ScreenHandler},
     ui::full_rect,
 };
 
-pub fn dashboard_handler() -> ScreenHandler<backend::Screen> {
+pub fn dashboard_handler() -> ScreenHandler<Screen> {
     ScreenHandler {
-        matches: backend::Screen::is_dashboard,
+        matches: |s| matches!(s, Screen::Dashboard),
         get: |s| match s {
-            backend::Screen::Dashboard => Some(s),
+            Screen::Dashboard => Some(s),
             _ => None,
         },
         get_mut: |s| match s {
-            backend::Screen::Dashboard => Some(s),
+            Screen::Dashboard => Some(s),
             _ => None,
         },
         render: ui,
-        handle_key: |app, key_code, _| None,
+        handle_key: |_app, _key_code, _| None,
         handle_tick: handle_tick,
     }
 }
 
-fn handle_tick(app: &AppState, _state: &mut backend::Screen) -> Option<AppEffect> {
+fn handle_tick(_app: &AppState, _state: &mut Screen) -> Option<AppEffect> {
     return Some(Box::new(move |app| {
-        app.state.db.index += 1;
+        app.db.index += 1;
         let _ = app.save_db();
     }));
 }
 
-fn ui(frame: &mut Frame, app: &AppState, _kind: &backend::Screen) {
+fn ui(frame: &mut Frame, app: &AppState, _kind: &Screen) {
     let a = frame.area();
 
     let (inner, area) = full_rect(a, "Stassh", "Use ←/→ or Tab to switch");

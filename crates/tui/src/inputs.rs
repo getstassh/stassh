@@ -1,6 +1,8 @@
 use crossterm::event::KeyCode;
 
-pub fn handle_yes_no_input(state: &mut backend::YesNoState, key_code: KeyCode) -> Option<bool> {
+use crate::navigation::{StringState, YesNoState};
+
+pub fn handle_yes_no_input(state: &mut YesNoState, key_code: KeyCode) -> Option<bool> {
     if key_code == KeyCode::Left || key_code == KeyCode::Right || key_code == KeyCode::Tab {
         state.toggle();
         None
@@ -13,7 +15,7 @@ pub fn handle_yes_no_input(state: &mut backend::YesNoState, key_code: KeyCode) -
     }
 }
 
-pub fn handle_text_input(state: &mut backend::StringState, key_code: KeyCode) -> Option<&str> {
+pub fn handle_text_input(state: &mut StringState, key_code: KeyCode) -> Option<&str> {
     match key_code {
         KeyCode::Char(c) => {
             let mut text = state.text.clone();

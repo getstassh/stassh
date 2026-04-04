@@ -3,8 +3,10 @@ use ratatui::{
     text::{Line, Span},
 };
 
-pub fn line_with_caret(state: &backend::StringState) -> Line<'static> {
-    let text = state.clone().visible_text();
+use crate::navigation::StringState;
+
+pub fn line_with_caret(state: &StringState) -> Line<'static> {
+    let text = state.visible_text();
     let caret = state.caret_position;
 
     let before = text[..caret].to_string();

@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use backend::App;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
@@ -11,9 +10,12 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
+use crate::app::App;
 use crate::screens::get_handler_for_screen;
 
+mod app;
 mod inputs;
+mod navigation;
 mod screens;
 mod ui;
 
@@ -24,8 +26,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let config = backend::Config::load_config();
-    let mut app = App::new(config);
+    let mut app = App::new();
     let app_result = run_app(&mut terminal, &mut app);
 
     disable_raw_mode()?;

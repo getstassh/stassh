@@ -4,44 +4,41 @@ use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
 
 use crate::{
     inputs::handle_yes_no_input,
+    navigation::{Screen, StringState, YesNoState},
     screens::{AppEffect, ScreenHandler},
     ui::{button, dual_vertical_rect, full_rect},
 };
 
-pub fn onboarding_wants_encryption_handler() -> ScreenHandler<backend::YesNoState> {
+pub fn onboarding_wants_encryption_handler() -> ScreenHandler<YesNoState> {
     ScreenHandler {
-        matches: backend::Screen::is_onboarding_wants_encryption,
+        matches: |s| matches!(s, Screen::OnboardingWantsEncryption { .. }),
         get: |s| match s {
-            backend::Screen::OnboardingWantsEncryption { state } => Some(state),
+            Screen::OnboardingWantsEncryption { state } => Some(state),
             _ => None,
         },
         get_mut: |s| match s {
-            backend::Screen::OnboardingWantsEncryption { state } => Some(state),
+            Screen::OnboardingWantsEncryption { state } => Some(state),
             _ => None,
         },
         render: ui,
         handle_key: handle_key,
-        handle_tick: |app, _| None,
+        handle_tick: |_app, _| None,
     }
 }
 
-fn handle_key(
-    _: &AppState,
-    key_code: KeyCode,
-    state: &mut backend::YesNoState,
-) -> Option<AppEffect> {
+fn handle_key(_: &AppState, key_code: KeyCode, state: &mut YesNoState) -> Option<AppEffect> {
     let result = handle_yes_no_input(state, key_code);
     if let Some(result) = result {
         return Some(Box::new(move |app| {
             if result {
-                app.screen = backend::Screen::OnboardingWantsPassphrase {
-                    state: backend::StringState::invisible(),
+                app.screen = Screen::OnboardingWantsPassphrase {
+                    state: StringState::invisible(),
                 };
             } else {
-                app.state.config.db_encryption = Some(backend::DbEncryption::None);
-                app.save_config();
-                app.load_db();
-                app.screen = backend::Screen::Dashboard;
+                app.config.db_encryption = Some(backend::DbEncryption::None);
+                let _ = app.save_config();
+                let _ = app.load_db();
+                app.screen = Screen::Dashboard;
             }
         }));
     }
@@ -49,7 +46,7 @@ fn handle_key(
     None
 }
 
-fn ui(frame: &mut Frame, _app: &AppState, state: &backend::YesNoState) {
+fn ui(frame: &mut Frame, _app: &AppState, state: &YesNoState) {
     let a = frame.area();
 
     let (inner, area) = full_rect(

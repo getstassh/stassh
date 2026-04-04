@@ -4,50 +4,47 @@ use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
 
 use crate::{
     inputs::handle_text_input,
+    navigation::{Screen, StringState},
     screens::{AppEffect, ScreenHandler},
     ui::{centered_rect, dual_vertical_rect, full_rect, line_with_caret},
 };
 
-pub fn onboarding_wants_passphrase_handler() -> ScreenHandler<backend::StringState> {
+pub fn onboarding_wants_passphrase_handler() -> ScreenHandler<StringState> {
     ScreenHandler {
-        matches: backend::Screen::is_onboarding_wants_passphrase,
+        matches: |s| matches!(s, Screen::OnboardingWantsPassphrase { .. }),
         get: |s| match s {
-            backend::Screen::OnboardingWantsPassphrase { state } => Some(state),
+            Screen::OnboardingWantsPassphrase { state } => Some(state),
             _ => None,
         },
         get_mut: |s| match s {
-            backend::Screen::OnboardingWantsPassphrase { state } => Some(state),
+            Screen::OnboardingWantsPassphrase { state } => Some(state),
             _ => None,
         },
         render: ui,
         handle_key: handle_key,
-        handle_tick: |app, _| None,
+        handle_tick: |_app, _| None,
     }
 }
-fn handle_key(
-    _: &AppState,
-    key_code: KeyCode,
-    state: &mut backend::StringState,
-) -> Option<AppEffect> {
+fn handle_key(_: &AppState, key_code: KeyCode, state: &mut StringState) -> Option<AppEffect> {
     let text = handle_text_input(state, key_code);
     if let Some(text) = text {
         let text = text.to_string();
         return Some(Box::new(move |app| {
-            app.state.config.db_encryption = Some(backend::DbEncryption::Passphrase);
-            app.save_config();
-            app.state.password = Some(text);
+            app.config.db_encryption = Some(backend::DbEncryption::Passphrase);
+            let _ = app.save_config();
+            app.password = Some(text);
             let result = app.load_db();
             if let Err(e) = result {
                 panic!("Failed to load database with provided passphrase: {e}");
             }
 
-            app.screen = backend::Screen::Dashboard;
+            app.screen = Screen::Dashboard;
         }));
     }
     None
 }
 
-fn ui(frame: &mut Frame, _app: &AppState, state: &backend::StringState) {
+fn ui(frame: &mut Frame, _app: &AppState, state: &StringState) {
     let a = frame.area();
 
     let (inner, area) = full_rect(
