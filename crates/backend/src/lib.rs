@@ -35,7 +35,7 @@ impl AppState {
             }
             Some(DbEncryption::Passphrase) => {
                 default_screen = Screen::AskingPassphrase {
-                    passphrase: StringState::new(),
+                    state: StringState::invisible(),
                 };
                 // ask for passphrase, load db with encryption
             }

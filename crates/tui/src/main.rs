@@ -18,6 +18,10 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
+use crate::ui::{button, centered_rect, dual_vertical_rect, full_rect};
+
+mod ui;
+
 fn main() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -64,7 +68,7 @@ fn run_app(
             if let Event::Key(key) = event::read()? {
                 let key_code = key.code;
                 if key.kind == KeyEventKind::Press {
-                    if (key_code == KeyCode::Char('q')) {
+                    if key_code == KeyCode::Char('q') {
                         app.request_quit();
                     }
 
@@ -79,33 +83,56 @@ fn run_app(
                             {
                                 state.toggle();
                             }
-                            if key_code == KeyCode::Char('y') {
+                            if key_code == KeyCode::Char('y')
+                                || (key_code == KeyCode::Enter && state.is_yes())
+                            {
                                 selected_encryption = Some(backend::DbEncryption::Passphrase);
-                                // save config
+                                app.config.save_config().ok();
                                 next_screen = Some(backend::Screen::OnboardingWantsPassphrase {
-                                    passphrase: backend::StringState::new(),
+                                    state: backend::StringState::invisible(),
                                 });
                             }
-                            if key_code == KeyCode::Char('n') {
+                            if key_code == KeyCode::Char('n')
+                                || (key_code == KeyCode::Enter && state.is_no())
+                            {
                                 selected_encryption = Some(backend::DbEncryption::None);
-                                // save config
+                                app.config.save_config().ok();
                                 next_screen = Some(backend::Screen::Dashboard);
                             }
-                            if key_code == KeyCode::Enter {
-                                if state.is_yes() {
-                                    selected_encryption = Some(backend::DbEncryption::Passphrase);
-                                    // save config
-                                    next_screen =
-                                        Some(backend::Screen::OnboardingWantsPassphrase {
-                                            passphrase: backend::StringState::new(),
-                                        });
-                                } else {
-                                    selected_encryption = Some(backend::DbEncryption::None);
-                                    // save config
-                                    next_screen = Some(backend::Screen::Dashboard);
+                        }
+                        backend::Screen::OnboardingWantsPassphrase { state }
+                        | backend::Screen::AskingPassphrase { state } => match key_code {
+                            KeyCode::Char(c) => {
+                                let mut text = state.text.clone();
+                                text.insert(state.caret_position, c);
+                                state.set_text(text);
+                                state.caret_position += 1;
+                            }
+                            KeyCode::Backspace => {
+                                let mut text = state.text.clone();
+                                if state.caret_position > 0 {
+                                    text.remove(state.caret_position - 1);
+                                    state.set_text(text);
+                                    state.caret_position -= 1;
                                 }
                             }
-                        }
+                            KeyCode::Enter => {
+                                selected_encryption = Some(backend::DbEncryption::Passphrase);
+                                app.config.save_config().ok();
+                                next_screen = Some(backend::Screen::Dashboard);
+                            }
+                            KeyCode::Left => {
+                                if state.caret_position > 0 {
+                                    state.caret_position -= 1;
+                                }
+                            }
+                            KeyCode::Right => {
+                                if state.caret_position < state.text.len() {
+                                    state.caret_position += 1;
+                                }
+                            }
+                            _ => {}
+                        },
                         _ => {}
                     }
 
@@ -122,113 +149,68 @@ fn run_app(
     }
 }
 
-fn ui(frame: &mut Frame, app: &AppState) {
+fn ui(frame: &mut Frame, app: &mut AppState) {
     match &app.screen {
         backend::Screen::LoadingLogo => ui_loading_logo(frame, app),
         backend::Screen::OnboardingWantsEncryption { state } => {
             ui_onboarding_wants_encryption(frame, app, state)
         }
-        backend::Screen::OnboardingWantsPassphrase { .. } => {
-            ui_onboarding_wants_passphrase(frame, app)
+        backend::Screen::OnboardingWantsPassphrase { state } => {
+            let mut s = state.clone();
+            ui_onboarding_wants_passphrase(frame, app, &mut s);
+            app.set_screen(backend::Screen::OnboardingWantsPassphrase { state: s });
         }
         backend::Screen::AskingPassphrase { .. } => ui_asking_passphrase(frame, app),
         backend::Screen::Dashboard => ui_dashboard(frame, app),
     }
 }
-fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(height),
-            Constraint::Fill(1),
-        ])
-        .split(area);
-
-    let horizontal = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(width),
-            Constraint::Fill(1),
-        ])
-        .split(vertical[1]);
-
-    horizontal[1]
-}
 
 fn ui_onboarding_wants_encryption(frame: &mut Frame, _app: &AppState, state: &backend::YesNoState) {
-    let area = frame.area();
+    let a = frame.area();
 
-    let title = Line::from(" Welcome to stassh! ").centered();
-    let controls =
-        Line::from(" Use ←/→ or Tab to switch, Enter to confirm, Y/N for quick answer ").centered();
+    let (inner, area) = full_rect(
+        a,
+        "Welcome to stassh!",
+        "Use ←/→ or Tab to switch, Enter to confirm, Y/N for quick answers",
+    );
 
-    let dialog_area = centered_rect(area.width, area.height, area);
-
-    let block = Block::default()
-        .title(title)
-        .title_bottom(controls)
-        .borders(Borders::ALL);
-
-    let inner = block.inner(dialog_area);
-
-    frame.render_widget(block, dialog_area);
-
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(2), // question
-            Constraint::Length(1), // spacer
-            Constraint::Length(1), // buttons
-        ])
-        .split(inner);
+    frame.render_widget(inner, a);
 
     let question = Paragraph::new("Do you want to enable encryption?").alignment(Alignment::Center);
 
-    let yes_style = if state.is_yes() {
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Green)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
-
-    let no_style = if state.is_no() {
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::Red)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default()
-    };
-
     let buttons = Paragraph::new(format!(
-        "   {}      {}   ",
-        styled_button("Yes", yes_style),
-        styled_button("No", no_style),
+        "{} {}",
+        button("Yes", state.is_yes()),
+        button("No", state.is_no()),
     ))
     .alignment(Alignment::Center);
 
-    frame.render_widget(question, layout[0]);
-    frame.render_widget(buttons, layout[2]);
+    let (top, bottom) = dual_vertical_rect(area);
+    frame.render_widget(question, top);
+    frame.render_widget(buttons, bottom);
 }
 
-fn styled_button(label: &str, style: Style) -> String {
-    if style == Style::default() {
-        format!("[ {} ]", label)
-    } else {
-        format!("[*{}*]", label)
-    }
-}
+fn ui_onboarding_wants_passphrase(
+    frame: &mut Frame,
+    _app: &AppState,
+    state: &mut backend::StringState,
+) {
+    let a = frame.area();
 
-fn ui_onboarding_wants_passphrase(frame: &mut Frame, app: &AppState) {
-    let size = frame.area();
-    let block = Block::default()
-        .style(Style::default().bg(Color::Yellow))
-        .title("Enter a passphrase to encrypt your database:");
-    frame.render_widget(block, size);
+    let (inner, area) = full_rect(
+        a,
+        "Welcome to stassh!",
+        "Use ←/→ or Tab to switch, Enter to confirm, type your passphrase",
+    );
+
+    frame.render_widget(inner, a);
+
+    let question = Paragraph::new("Enter your passphrase:").alignment(Alignment::Center);
+    let passphrase = Paragraph::new(state.visible_text()).alignment(Alignment::Center);
+
+    let (top, bottom) = dual_vertical_rect(area);
+    frame.render_widget(question, top);
+    frame.render_widget(passphrase, bottom);
 }
 
 fn ui_asking_passphrase(frame: &mut Frame, app: &AppState) {
