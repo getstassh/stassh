@@ -1,4 +1,6 @@
-use crate::ssh_client::{LiveSshSession, TrustChallenge};
+use std::time::Instant;
+
+use crate::ssh_client::{LiveSshSession, PendingSshStart, TrustChallenge};
 
 pub(crate) enum Screen {
     OnboardingWantsEncryption { state: YesNoState },
@@ -20,7 +22,7 @@ impl SshSessionState {
         Self {
             title,
             parser: vt100::Parser::new(rows, cols, 10_000),
-            phase: SshSessionPhase::Starting { host_id },
+            phase: SshSessionPhase::starting(host_id),
         }
     }
 
@@ -32,6 +34,9 @@ impl SshSessionState {
 pub(crate) enum SshSessionPhase {
     Starting {
         host_id: u32,
+        pending: Option<PendingSshStart>,
+        spinner_frame: usize,
+        started_at: Instant,
     },
     TrustPrompt {
         host_id: u32,
@@ -41,6 +46,17 @@ pub(crate) enum SshSessionPhase {
         live: LiveSshSession,
     },
     Error(String),
+}
+
+impl SshSessionPhase {
+    pub(crate) fn starting(host_id: u32) -> Self {
+        Self::Starting {
+            host_id,
+            pending: None,
+            spinner_frame: 0,
+            started_at: Instant::now(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

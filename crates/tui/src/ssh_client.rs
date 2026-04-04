@@ -1,6 +1,6 @@
 use std::{
     env,
-    sync::{Arc, Mutex, mpsc},
+    sync::{Arc, Mutex, mpsc, mpsc::TryRecvError},
     thread,
     time::Duration,
 };
@@ -62,6 +62,66 @@ pub(crate) enum StartSessionResult {
     Started(LiveSshSession),
     TrustRequired(TrustChallenge),
     Error(String),
+}
+
+pub(crate) struct PendingSshStart {
+    input_tx: Option<tokio_mpsc::UnboundedSender<SessionInput>>,
+    event_rx: Option<mpsc::Receiver<SessionEvent>>,
+    ready_rx: mpsc::Receiver<SessionReady>,
+    join: Option<thread::JoinHandle<()>>,
+}
+
+impl PendingSshStart {
+    pub(crate) fn try_recv(&mut self) -> Option<StartSessionResult> {
+        match self.ready_rx.try_recv() {
+            Ok(SessionReady::Started) => {
+                let input_tx = self
+                    .input_tx
+                    .take()
+                    .expect("pending SSH start missing input channel");
+                let event_rx = self
+                    .event_rx
+                    .take()
+                    .expect("pending SSH start missing event channel");
+
+                Some(StartSessionResult::Started(LiveSshSession {
+                    input_tx,
+                    event_rx,
+                    join: self.join.take(),
+                }))
+            }
+            Ok(SessionReady::TrustRequired(challenge)) => {
+                if let Some(join) = self.join.take() {
+                    let _ = join.join();
+                }
+                Some(StartSessionResult::TrustRequired(challenge))
+            }
+            Ok(SessionReady::Error(error)) => {
+                if let Some(join) = self.join.take() {
+                    let _ = join.join();
+                }
+                Some(StartSessionResult::Error(error))
+            }
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => {
+                if let Some(join) = self.join.take() {
+                    let _ = join.join();
+                }
+                Some(StartSessionResult::Error(
+                    "SSH session failed to start".to_string(),
+                ))
+            }
+        }
+    }
+
+    pub(crate) fn cancel(&mut self) {
+        if let Some(input_tx) = &self.input_tx {
+            let _ = input_tx.send(SessionInput::Disconnect);
+        }
+        self.input_tx.take();
+        self.event_rx.take();
+        self.join.take();
+    }
 }
 
 #[derive(Debug)]
@@ -137,10 +197,10 @@ impl client::Handler for VerifyHandler {
     }
 }
 
-pub(crate) fn start_session(
+pub(crate) fn start_session_async(
     host: &SshHost,
     trusted_host_keys: &[TrustedHostKey],
-) -> StartSessionResult {
+) -> PendingSshStart {
     let (input_tx, input_rx) = tokio_mpsc::unbounded_channel::<SessionInput>();
     let (event_tx, event_rx) = mpsc::channel::<SessionEvent>();
     let (ready_tx, ready_rx) = mpsc::channel::<SessionReady>();
@@ -197,24 +257,11 @@ pub(crate) fn start_session(
         }
     });
 
-    match ready_rx.recv() {
-        Ok(SessionReady::TrustRequired(challenge)) => {
-            let _ = join.join();
-            StartSessionResult::TrustRequired(challenge)
-        }
-        Ok(SessionReady::Error(error)) => {
-            let _ = join.join();
-            StartSessionResult::Error(error)
-        }
-        Ok(SessionReady::Started) => StartSessionResult::Started(LiveSshSession {
-            input_tx,
-            event_rx,
-            join: Some(join),
-        }),
-        Err(_) => {
-            let _ = join.join();
-            StartSessionResult::Error("SSH session failed to start".to_string())
-        }
+    PendingSshStart {
+        input_tx: Some(input_tx),
+        event_rx: Some(event_rx),
+        ready_rx,
+        join: Some(join),
     }
 }
 

@@ -11,7 +11,7 @@ use ratatui::{
 use crate::{
     navigation::{DashboardState, Screen, SshSessionPhase, SshSessionState},
     screens::{AppEffect, ScreenHandler},
-    ssh_client::{SessionEvent, SessionInput, StartSessionResult, start_session},
+    ssh_client::{SessionEvent, SessionInput, StartSessionResult, start_session_async},
     ui::full_rect,
 };
 
@@ -34,8 +34,11 @@ pub(crate) static HANDLER: ScreenHandler<SshSessionState> = ScreenHandler {
 
 fn handle_key(_: &AppState, key: KeyEvent, state: &mut SshSessionState) -> Option<AppEffect> {
     match &mut state.phase {
-        SshSessionPhase::Starting { .. } => {
+        SshSessionPhase::Starting { pending, .. } => {
             if key.code == KeyCode::Esc {
+                if let Some(pending) = pending {
+                    pending.cancel();
+                }
                 return Some(back_to_dashboard("Connection canceled".to_string()));
             }
             None
@@ -44,7 +47,7 @@ fn handle_key(_: &AppState, key: KeyEvent, state: &mut SshSessionState) -> Optio
             if matches!(key.code, KeyCode::Char('y') | KeyCode::Enter) {
                 let host_id = *host_id;
                 let key = challenge.proposed_key.clone();
-                state.phase = SshSessionPhase::Starting { host_id };
+                state.phase = SshSessionPhase::starting(host_id);
                 return Some(Box::new(move |app| {
                     trust_host_key(app, key);
                 }));
@@ -98,35 +101,52 @@ fn handle_resize(
 }
 
 fn handle_tick(app: &AppState, state: &mut SshSessionState) -> Option<AppEffect> {
+    let mut next_phase = None;
+
     match &mut state.phase {
-        SshSessionPhase::Starting { host_id } => {
-            let Some(host) = app.db.hosts.iter().find(|h| h.id == *host_id).cloned() else {
-                return Some(back_to_dashboard(
-                    "Selected host no longer exists".to_string(),
-                ));
+        SshSessionPhase::Starting {
+            host_id,
+            pending,
+            spinner_frame,
+            ..
+        } => {
+            *spinner_frame = spinner_frame.wrapping_add(1);
+
+            if pending.is_none() {
+                let Some(host) = app.db.hosts.iter().find(|h| h.id == *host_id).cloned() else {
+                    return Some(back_to_dashboard(
+                        "Selected host no longer exists".to_string(),
+                    ));
+                };
+
+                *pending = Some(start_session_async(&host, &app.db.trusted_host_keys));
+            }
+
+            let Some(pending_start) = pending.as_mut() else {
+                return None;
             };
 
-            match start_session(&host, &app.db.trusted_host_keys) {
+            let Some(result) = pending_start.try_recv() else {
+                return None;
+            };
+
+            match result {
                 StartSessionResult::Started(live) => {
-                    state.phase = SshSessionPhase::Running { live };
-                    state.title = format!("{}@{}:{}", host.user, host.host, host.port);
-                    None
+                    next_phase = Some(SshSessionPhase::Running { live });
                 }
                 StartSessionResult::TrustRequired(challenge) => {
-                    state.phase = SshSessionPhase::TrustPrompt {
+                    next_phase = Some(SshSessionPhase::TrustPrompt {
                         host_id: *host_id,
                         challenge,
-                    };
-                    None
+                    });
                 }
                 StartSessionResult::Error(error) => {
-                    state.phase = SshSessionPhase::Error(error);
-                    None
+                    next_phase = Some(SshSessionPhase::Error(error));
                 }
             }
         }
-        SshSessionPhase::TrustPrompt { .. } => None,
-        SshSessionPhase::Error(_) => None,
+        SshSessionPhase::TrustPrompt { .. } => {}
+        SshSessionPhase::Error(_) => {}
         SshSessionPhase::Running { live } => {
             let parser = &mut state.parser;
             let mut events = Vec::new();
@@ -149,10 +169,14 @@ fn handle_tick(app: &AppState, state: &mut SshSessionState) -> Option<AppEffect>
                 live.stop();
                 return Some(back_to_dashboard(status));
             }
-
-            None
         }
     }
+
+    if let Some(phase) = next_phase {
+        state.phase = phase;
+    }
+
+    None
 }
 
 fn back_to_dashboard(status: String) -> AppEffect {
@@ -185,8 +209,26 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &SshSessionState) {
 
     match &state.phase {
         SshSessionPhase::Starting { .. } => {
+            let (spinner, elapsed) = match &state.phase {
+                SshSessionPhase::Starting {
+                    spinner_frame,
+                    started_at,
+                    ..
+                } => {
+                    const FRAMES: [&str; 8] = ["-", "\\", "|", "/", "-", "\\", "|", "/"];
+                    let spinner = FRAMES[*spinner_frame % FRAMES.len()];
+                    let elapsed = started_at.elapsed().as_secs_f32();
+                    (spinner, elapsed)
+                }
+                _ => ("-", 0.0),
+            };
+
             frame.render_widget(
-                Paragraph::new("Establishing SSH connection...").alignment(Alignment::Center),
+                Paragraph::new(format!(
+                    "{spinner} Connecting to {}\n\nPlease wait... ({elapsed:.1}s)",
+                    state.title
+                ))
+                .alignment(Alignment::Center),
                 area,
             );
         }
