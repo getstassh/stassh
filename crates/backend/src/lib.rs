@@ -25,13 +25,27 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: Config) -> Self {
+        let mut db = Database::default();
+        let screen = match config.db_encryption {
+            Some(DbEncryption::None) => {
+                db = load_db(DbEncryption::None, None).unwrap_or_else(|_| Database::default());
+                Screen::Dashboard
+            }
+            Some(DbEncryption::Passphrase) => Screen::AskingPassphrase {
+                state: StringState::invisible(),
+            },
+            None => Screen::OnboardingWantsEncryption {
+                state: YesNoState::new(),
+            },
+        };
+
         Self {
             app_name: "stassh".to_string(),
             started_timestamp: Self::get_timestamp(),
             should_quit: false,
-            screen: Screen::LoadingLogo,
+            screen,
             config,
-            db: Database::default(),
+            db,
             password: None,
         }
     }

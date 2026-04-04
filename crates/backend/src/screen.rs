@@ -1,6 +1,5 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
-    LoadingLogo,
     OnboardingWantsEncryption { state: YesNoState },
     OnboardingWantsPassphrase { state: StringState },
     AskingPassphrase { state: StringState },

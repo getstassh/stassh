@@ -14,9 +14,8 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     prelude::{Color, Frame, Line, Style},
-    style::Modifier,
     text::{Span, Text},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
 };
 
 use crate::ui::{button, centered_rect, dual_vertical_rect, full_rect, line_with_caret};
@@ -56,28 +55,6 @@ fn run_app(
 
     loop {
         terminal.draw(|frame| ui(frame, app))?;
-
-        if app.time_since_start() > Duration::from_secs(1)
-            && app.screen == backend::Screen::LoadingLogo
-        {
-            match app.config.db_encryption {
-                Some(backend::DbEncryption::Passphrase) => {
-                    app.set_screen(backend::Screen::AskingPassphrase {
-                        state: backend::StringState::invisible(),
-                    });
-                }
-                Some(backend::DbEncryption::None) => {
-                    app.db = backend::load_db(backend::DbEncryption::None, None)
-                        .unwrap_or_else(|_| backend::Database::default());
-                    app.set_screen(backend::Screen::Dashboard);
-                }
-                None => {
-                    app.set_screen(backend::Screen::OnboardingWantsEncryption {
-                        state: backend::YesNoState::new(),
-                    });
-                }
-            }
-        }
 
         if app.should_quit() {
             return Ok(());
@@ -250,7 +227,6 @@ fn run_app(
 
 fn ui(frame: &mut Frame, app: &AppState) {
     match &app.screen {
-        backend::Screen::LoadingLogo => ui_loading_logo(frame, app),
         backend::Screen::OnboardingWantsEncryption { state } => {
             ui_onboarding_wants_encryption(frame, app, state)
         }
@@ -319,32 +295,39 @@ fn ui_asking_passphrase(frame: &mut Frame, _app: &AppState, state: &backend::Str
     let (inner, area) = full_rect(
         a,
         "Enter Passphrase",
-        "Use ←/→ or Tab to switch, Enter to confirm, type your passphrase",
+        "Type your passphrase and press Enter",
     );
 
     frame.render_widget(inner, a);
 
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(ASCII_ART.lines().count() as u16 + 2),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Min(0),
+        ])
+        .split(area);
+
+    render_logo_with_credits(frame, layout[0]);
+
     let question = Paragraph::new("Enter your passphrase:").alignment(Alignment::Center);
-    let (top, bottom) = dual_vertical_rect(area);
-    frame.render_widget(question, top);
-    let (text_box, text_box_area, text_area) = centered_rect(50, 3, bottom);
+    frame.render_widget(question, layout[2]);
+    let (text_box, text_box_area, text_area) = centered_rect(50, 3, layout[3]);
     frame.render_widget(text_box, text_box_area);
     let passphrase = Paragraph::new(line_with_caret(state)).alignment(Alignment::Left);
     frame.render_widget(passphrase, text_area);
 }
 
-fn ui_loading_logo(frame: &mut Frame, _app: &AppState) {
-    const BG_HEX: u32 = 0x001521;
+fn render_logo_with_credits(frame: &mut Frame, area: Rect) {
     const WHITE_HEX: u32 = 0xFFFFFF;
     const ORANGE_HEX: u32 = 0xE77500;
     const SPLIT_COL: usize = 50;
 
-    let bg = hex_color(BG_HEX);
     let white = hex_color(WHITE_HEX);
     let orange = hex_color(ORANGE_HEX);
-
-    let size = frame.area();
-    let block = Block::default().style(Style::default().bg(bg));
 
     let mut lines = Vec::new();
     for raw_line in ASCII_ART.lines() {
@@ -356,19 +339,18 @@ fn ui_loading_logo(frame: &mut Frame, _app: &AppState) {
         let (left, right) = raw_line.split_at(split_idx);
 
         lines.push(Line::from(vec![
-            Span::styled(left.to_string(), Style::default().fg(white).bg(bg)),
-            Span::styled(right.to_string(), Style::default().fg(orange).bg(bg)),
+            Span::styled(left.to_string(), Style::default().fg(white)),
+            Span::styled(right.to_string(), Style::default().fg(orange)),
         ]));
     }
     lines.push(Line::raw(""));
     lines.push(Line::from(Span::styled(
         "Created by Lazar (bylazar.com)",
-        Style::default().fg(white).bg(bg),
+        Style::default().fg(white),
     )));
 
     let art = Paragraph::new(Text::from(lines)).alignment(Alignment::Center);
-    frame.render_widget(block, size);
-    frame.render_widget(art, size);
+    frame.render_widget(art, area);
 }
 
 fn hex_color(hex: u32) -> Color {
