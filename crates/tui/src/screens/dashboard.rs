@@ -1,8 +1,8 @@
 use backend::AppState;
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout},
     widgets::Paragraph,
+    Frame,
 };
 
 use crate::{
@@ -12,9 +12,15 @@ use crate::{
 };
 
 pub(crate) static HANDLER: ScreenHandler<()> = ScreenHandler {
-    matches: |s| matches!(s, Screen::Dashboard),
-    get: |_| None,
-    get_mut: |_| None,
+    matches: |s| matches!(s, Screen::Dashboard { .. }),
+    get: |s| match s {
+        Screen::Dashboard { state } => Some(state),
+        _ => None,
+    },
+    get_mut: |s| match s {
+        Screen::Dashboard { state } => Some(state),
+        _ => None,
+    },
     render: ui,
     handle_key: |_app, _key_code, _| None,
     handle_tick: handle_tick,

@@ -4,19 +4,19 @@ use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
 
 use crate::{
     inputs::handle_yes_no_input,
-    navigation::{Screen, StringState, YesNoState},
+    navigation::{Screen, YesNoState},
     screens::{AppEffect, ScreenHandler},
     ui::{button, dual_vertical_rect, full_rect},
 };
 
 pub(crate) static HANDLER: ScreenHandler<YesNoState> = ScreenHandler {
-    matches: |s| matches!(s, Screen::OnboardingWantsEncryption { .. }),
+    matches: |s| matches!(s, Screen::OnboardingWantsTelemetry { .. }),
     get: |s| match s {
-        Screen::OnboardingWantsEncryption { state } => Some(state),
+        Screen::OnboardingWantsTelemetry { state } => Some(state),
         _ => None,
     },
     get_mut: |s| match s {
-        Screen::OnboardingWantsEncryption { state } => Some(state),
+        Screen::OnboardingWantsTelemetry { state } => Some(state),
         _ => None,
     },
     render: ui,
@@ -28,16 +28,9 @@ fn handle_key(_: &AppState, key_code: KeyCode, state: &mut YesNoState) -> Option
     let result = handle_yes_no_input(state, key_code);
     if let Some(result) = result {
         return Some(Box::new(move |app| {
-            if result {
-                app.screen = Screen::OnboardingWantsPassphrase {
-                    state: StringState::invisible(),
-                };
-            } else {
-                app.config.db_encryption = Some(backend::DbEncryption::None);
-                let _ = app.save_config();
-                let _ = app.load_db();
-                app.go_to_dashboard();
-            }
+            app.config.enable_telemetry = Some(result);
+            let _ = app.save_config();
+            app.go_to_dashboard();
         }));
     }
 
@@ -55,7 +48,8 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &YesNoState) {
 
     frame.render_widget(inner, a);
 
-    let question = Paragraph::new("Do you want to enable encryption?").alignment(Alignment::Center);
+    let question =
+        Paragraph::new("Do you want to share anonymous telemetry?").alignment(Alignment::Center);
 
     let buttons = Paragraph::new(format!(
         "{} {}",

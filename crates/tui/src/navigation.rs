@@ -4,7 +4,7 @@ pub(crate) enum Screen {
     OnboardingWantsPassphrase { state: StringState },
     OnboardingWantsTelemetry { state: YesNoState },
     AskingPassphrase { state: StringState },
-    Dashboard,
+    Dashboard { state: () },
 }
 
 #[derive(Debug, Clone, PartialEq)]

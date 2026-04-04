@@ -16,7 +16,7 @@ impl App {
         let screen = match backend.config.db_encryption.clone() {
             Some(DbEncryption::None) => {
                 let _ = backend.load_db();
-                Screen::Dashboard
+                Screen::Dashboard { state: () }
             }
             Some(DbEncryption::Passphrase) => Screen::AskingPassphrase {
                 state: StringState::invisible(),
@@ -44,7 +44,7 @@ impl App {
             };
             return;
         }
-        self.screen = Screen::Dashboard;
+        self.screen = Screen::Dashboard { state: () };
     }
 }
 
