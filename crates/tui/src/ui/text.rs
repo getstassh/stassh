@@ -4,7 +4,7 @@ use ratatui::{
 };
 
 pub fn line_with_caret(state: &backend::StringState) -> Line<'static> {
-    let text = &state.text;
+    let text = state.clone().visible_text();
     let caret = state.caret_position;
 
     let before = text[..caret].to_string();
