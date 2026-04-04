@@ -68,6 +68,8 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
             }
             _ => {}
         }
+
+        return None;
     }
 
     if state.active_page != DashboardPage::Home {
@@ -387,11 +389,18 @@ fn move_down(selected: usize, hosts_len: usize) -> usize {
     if hosts_len == 0 {
         return 0;
     }
-    if selected + HOME_GRID_COLUMNS < hosts_len {
-        selected + HOME_GRID_COLUMNS
-    } else {
-        selected
+
+    let next_row_same_col = selected + HOME_GRID_COLUMNS;
+    if next_row_same_col < hosts_len {
+        return next_row_same_col;
     }
+
+    let next_row_start = ((selected / HOME_GRID_COLUMNS) + 1) * HOME_GRID_COLUMNS;
+    if next_row_start < hosts_len {
+        return next_row_start;
+    }
+
+    selected
 }
 
 fn next_page(page: DashboardPage) -> DashboardPage {
@@ -703,33 +712,11 @@ fn keybind_hint(state: &DashboardState, sidebar_visible: bool) -> &'static str {
 
     match state.active_page {
         DashboardPage::Home => {
-            if sidebar_visible {
-                "HOME: arrows or hjkl move, A add, E edit, Enter/C connect, 1-4 pages, Ctrl+B hide"
-            } else {
-                "HOME: arrows or hjkl move, A add, E edit, Enter/C connect, 1-4 pages, Ctrl+B show"
-            }
+            "HOME: arrows or hjkl move, A add, E edit, Enter/C connect, Ctrl+B toggle sidebar"
         }
-        DashboardPage::Settings => {
-            if sidebar_visible {
-                "SETTINGS: 1-4 pages, Ctrl+B hide"
-            } else {
-                "SETTINGS: 1-4 pages, Ctrl+B show"
-            }
-        }
-        DashboardPage::Debug => {
-            if sidebar_visible {
-                "DEBUG: 1-4 pages, Ctrl+B hide"
-            } else {
-                "DEBUG: 1-4 pages, Ctrl+B show"
-            }
-        }
-        DashboardPage::Credits => {
-            if sidebar_visible {
-                "CREDITS: 1-4 pages, Ctrl+B hide"
-            } else {
-                "CREDITS: 1-4 pages, Ctrl+B show"
-            }
-        }
+        DashboardPage::Settings => "Ctrl+B toggle sidebar",
+        DashboardPage::Debug => "Ctrl+B toggle sidebar",
+        DashboardPage::Credits => "Ctrl+B toggle sidebar",
     }
 }
 
