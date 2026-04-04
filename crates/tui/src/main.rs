@@ -18,7 +18,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-use crate::ui::{button, centered_rect, dual_vertical_rect, full_rect};
+use crate::ui::{button, centered_rect, dual_vertical_rect, full_rect, line_with_caret};
 
 mod ui;
 
@@ -206,11 +206,17 @@ fn ui_onboarding_wants_passphrase(
     frame.render_widget(inner, a);
 
     let question = Paragraph::new("Enter your passphrase:").alignment(Alignment::Center);
-    let passphrase = Paragraph::new(state.visible_text()).alignment(Alignment::Center);
-
     let (top, bottom) = dual_vertical_rect(area);
     frame.render_widget(question, top);
-    frame.render_widget(passphrase, bottom);
+    let (text_box, text_box_area, text_area) = centered_rect(50, 3, bottom);
+    frame.render_widget(text_box, text_box_area);
+    let passphrase = Paragraph::new(line_with_caret(
+        &state.visible_text(),
+        state.caret_position,
+        true,
+    ))
+    .alignment(Alignment::Left);
+    frame.render_widget(passphrase, text_area);
 }
 
 fn ui_asking_passphrase(frame: &mut Frame, app: &AppState) {

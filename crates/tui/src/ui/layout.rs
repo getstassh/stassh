@@ -3,7 +3,7 @@ use ratatui::{
     widgets::{Block, Borders},
 };
 
-pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+pub fn centered_rect<'a>(width: u16, height: u16, area: Rect) -> (Block<'a>, Rect, Rect) {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -12,7 +12,6 @@ pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
             Constraint::Fill(1),
         ])
         .split(area);
-
     let horizontal = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -21,8 +20,10 @@ pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
             Constraint::Fill(1),
         ])
         .split(vertical[1]);
-
-    horizontal[1]
+    let block = Block::default().borders(Borders::ALL);
+    let outer = horizontal[1];
+    let inner = block.inner(outer);
+    (block, outer, inner)
 }
 
 pub fn full_rect<'a>(area: Rect, title_top: &'a str, title_bottom: &'a str) -> (Block<'a>, Rect) {

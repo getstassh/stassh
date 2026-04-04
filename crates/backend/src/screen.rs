@@ -65,22 +65,6 @@ impl StringState {
             "*".repeat(self.text.len())
         };
 
-        if self.caret_position > text.len() {
-            self.caret_position = text.len();
-        }
-
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        let caret_visible = timestamp % 2 == 0;
-        if caret_visible {
-            let mut visible = text.clone();
-            visible.insert(self.caret_position, '|');
-            visible
-        } else {
-            text
-        }
+        format!("{} ", text)
     }
 }
