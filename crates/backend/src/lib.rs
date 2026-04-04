@@ -59,6 +59,10 @@ impl AppState {
         self.config.save_config()
     }
 
+    pub fn is_correct_password(&self, passphrase: &str) -> bool {
+        db::is_correct_password(passphrase).unwrap_or(false)
+    }
+
     pub fn delete_data(&mut self) -> Result<()> {
         config::delete_config()?;
         db::delete_db()?;

@@ -35,6 +35,7 @@ pub(crate) struct StringState {
     pub(crate) is_visible: bool,
     pub(crate) text: String,
     pub(crate) caret_position: usize,
+    pub(crate) error: Option<String>,
 }
 
 impl StringState {
@@ -43,6 +44,16 @@ impl StringState {
             is_visible: false,
             text: String::new(),
             caret_position: 0,
+            error: None,
+        }
+    }
+
+    pub(crate) fn invisible_with_error(error: String) -> Self {
+        Self {
+            is_visible: false,
+            text: String::new(),
+            caret_position: 0,
+            error: Some(error),
         }
     }
 

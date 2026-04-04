@@ -63,6 +63,39 @@ pub(crate) fn delete_db() -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn is_correct_password(passphrase: &str) -> Result<bool> {
+    let path = db_path()?;
+
+    if !path.exists() {
+        return Ok(true);
+    }
+
+    let text = fs::read_to_string(&path)
+        .with_context(|| format!("failed to read db file {}", path.display()))?;
+
+    let stored: StoredDb = serde_json::from_str(&text)
+        .with_context(|| format!("failed to parse db JSON from {}", path.display()))?;
+
+    match stored {
+        StoredDb::Plain { .. } => Ok(true),
+        StoredDb::EncryptedV1 {
+            salt_b64,
+            nonce_b64,
+            ciphertext_b64,
+        } => {
+            let decrypted = decrypt_db(
+                passphrase,
+                &EncryptedPayload {
+                    salt_b64,
+                    nonce_b64,
+                    ciphertext_b64,
+                },
+            );
+            Ok(decrypted.is_ok())
+        }
+    }
+}
+
 pub(crate) fn load_db(encryption: DbEncryption, passphrase: Option<&str>) -> Result<Database> {
     let path = db_path()?;
 

@@ -3,6 +3,7 @@ use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout},
+    style::{Color, Style},
     widgets::Paragraph,
 };
 
@@ -36,10 +37,21 @@ fn handle_key(_: &AppState, key_code: KeyCode, state: &mut StringState) -> Optio
     if let Some(text) = text {
         let text = text.to_string();
         return Some(Box::new(move |app| {
+            if !app.is_correct_password(&text) {
+                app.screen = Screen::AskingPassphrase {
+                    state: StringState::invisible_with_error("Incorrect passphrase".to_string()),
+                };
+                return;
+            }
             app.password = Some(text);
             let result = app.load_db();
             if let Err(e) = result {
-                panic!("Failed to load database with provided passphrase: {e}");
+                app.screen = Screen::OnboardingWantsPassphrase {
+                    state: StringState::invisible_with_error(format!(
+                        "Failed to load database with provided passphrase: {e}"
+                    )),
+                };
+                return;
             }
 
             app.go_to_dashboard();
@@ -70,6 +82,13 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &StringState) {
         .split(area);
 
     render_logo(frame, layout[0], LogoType::WithCredits);
+
+    if let Some(error) = &state.error {
+        let error = Paragraph::new(error.clone())
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Red));
+        frame.render_widget(error, layout[1]);
+    }
 
     let question = Paragraph::new("Enter your passphrase:").alignment(Alignment::Center);
     frame.render_widget(question, layout[2]);
