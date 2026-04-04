@@ -4,8 +4,10 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::db_crypto::{EncryptedPayload, decrypt_db, encrypt_db};
+use crate::migrations::{LATEST_DB_VERSION, migrate_db_value};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum DbEncryption {
@@ -16,15 +18,13 @@ pub enum DbEncryption {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Database {
     pub version: u32,
-    pub name: Option<String>,
     pub index: u32,
 }
 
 impl Database {
     pub fn default() -> Self {
         Self {
-            version: 0,
-            name: None,
+            version: LATEST_DB_VERSION,
             index: 0,
         }
     }
@@ -34,7 +34,7 @@ impl Database {
 #[serde(tag = "kind")]
 enum StoredDb {
     Plain {
-        db: Database,
+        db: Value,
     },
     EncryptedV1 {
         salt_b64: String,
@@ -77,7 +77,19 @@ pub fn load_db(encryption: DbEncryption, passphrase: Option<&str>) -> Result<Dat
         .with_context(|| format!("failed to parse db JSON from {}", path.display()))?;
 
     match stored {
-        StoredDb::Plain { db } => Ok(db),
+        StoredDb::Plain { db } => {
+            let (db, changed) = migrate_db_value(db)?;
+            if changed {
+                write_stored_db(
+                    &path,
+                    &StoredDb::Plain {
+                        db: serde_json::to_value(&db)
+                            .context("failed to serialize migrated plain database")?,
+                    },
+                )?;
+            }
+            Ok(db)
+        }
         StoredDb::EncryptedV1 {
             salt_b64,
             nonce_b64,
@@ -88,14 +100,31 @@ pub fn load_db(encryption: DbEncryption, passphrase: Option<&str>) -> Result<Dat
             }
             let passphrase =
                 passphrase.context("missing passphrase for encrypted database decryption")?;
-            decrypt_db(
+            let decrypted = decrypt_db(
                 passphrase,
                 &EncryptedPayload {
                     salt_b64,
                     nonce_b64,
                     ciphertext_b64,
                 },
-            )
+            )?;
+            let (db, changed) = migrate_db_value(decrypted)?;
+            if changed {
+                let payload = encrypt_db(
+                    &serde_json::to_value(&db)
+                        .context("failed to serialize migrated encrypted database")?,
+                    passphrase,
+                )?;
+                write_stored_db(
+                    &path,
+                    &StoredDb::EncryptedV1 {
+                        salt_b64: payload.salt_b64,
+                        nonce_b64: payload.nonce_b64,
+                        ciphertext_b64: payload.ciphertext_b64,
+                    },
+                )?;
+            }
+            Ok(db)
         }
     }
 }
@@ -103,12 +132,14 @@ pub fn load_db(encryption: DbEncryption, passphrase: Option<&str>) -> Result<Dat
 pub fn save_db(db: &Database, encryption: DbEncryption, passphrase: Option<&str>) -> Result<()> {
     let path = db_path()?;
 
+    let db_value = serde_json::to_value(db).context("failed to serialize database for save")?;
+
     let stored = match encryption {
-        DbEncryption::None => StoredDb::Plain { db: db.clone() },
+        DbEncryption::None => StoredDb::Plain { db: db_value },
         DbEncryption::Passphrase => {
             let passphrase =
                 passphrase.context("missing passphrase for encrypted database save")?;
-            let payload = encrypt_db(db, passphrase)?;
+            let payload = encrypt_db(&db_value, passphrase)?;
             StoredDb::EncryptedV1 {
                 salt_b64: payload.salt_b64,
                 nonce_b64: payload.nonce_b64,
@@ -117,6 +148,10 @@ pub fn save_db(db: &Database, encryption: DbEncryption, passphrase: Option<&str>
         }
     };
 
+    write_stored_db(&path, &stored)
+}
+
+fn write_stored_db(path: &PathBuf, stored: &StoredDb) -> Result<()> {
     let text = serde_json::to_string_pretty(&stored)?;
     fs::write(&path, text)
         .with_context(|| format!("failed to write db file {}", path.display()))?;

@@ -1,6 +1,7 @@
 mod config;
 mod db;
 mod db_crypto;
+mod migrations;
 mod screen;
 
 pub use crate::config::Config;

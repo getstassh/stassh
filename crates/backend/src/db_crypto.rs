@@ -6,8 +6,7 @@ use anyhow::{Context, Result, bail};
 use argon2::Argon2;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use rand::{RngCore, rngs::OsRng};
-
-use crate::db::Database;
+use serde_json::Value;
 
 #[derive(Debug, Clone)]
 pub struct EncryptedPayload {
@@ -16,7 +15,7 @@ pub struct EncryptedPayload {
     pub ciphertext_b64: String,
 }
 
-pub fn decrypt_db(passphrase: &str, payload: &EncryptedPayload) -> Result<Database> {
+pub fn decrypt_db(passphrase: &str, payload: &EncryptedPayload) -> Result<Value> {
     let salt = B64
         .decode(&payload.salt_b64)
         .context("invalid db salt encoding")?;
@@ -41,12 +40,12 @@ pub fn decrypt_db(passphrase: &str, payload: &EncryptedPayload) -> Result<Databa
             anyhow::anyhow!("failed to decrypt database (wrong passphrase or corrupt file)")
         })?;
 
-    let db: Database =
+    let db: Value =
         serde_json::from_slice(&plaintext).context("failed to parse decrypted database JSON")?;
     Ok(db)
 }
 
-pub fn encrypt_db(db: &Database, passphrase: &str) -> Result<EncryptedPayload> {
+pub fn encrypt_db(db: &Value, passphrase: &str) -> Result<EncryptedPayload> {
     let plaintext = serde_json::to_vec(db).context("failed to serialize database JSON")?;
 
     let mut salt = [0u8; 16];
