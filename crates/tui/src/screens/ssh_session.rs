@@ -321,7 +321,14 @@ fn centered_rect_no_border(width: u16, height: u16, area: Rect) -> Rect {
 fn render_vt100_text(parser: &vt100::Parser) -> Text<'static> {
     let screen = parser.screen();
     let (rows, cols) = screen.size();
-    let (cursor_row, cursor_col) = screen.cursor_position();
+    if rows == 0 || cols == 0 {
+        return Text::from(Vec::<Line<'static>>::new());
+    }
+
+    let (raw_cursor_row, raw_cursor_col) = screen.cursor_position();
+    let cursor_visible = !screen.hide_cursor();
+    let cursor_row = raw_cursor_row.min(rows.saturating_sub(1));
+    let cursor_col = raw_cursor_col.min(cols.saturating_sub(1));
     let mut lines = Vec::with_capacity(rows as usize);
 
     for r in 0..rows {
@@ -339,13 +346,20 @@ fn render_vt100_text(parser: &vt100::Parser) -> Text<'static> {
             }
 
             let mut style = style_from_cell(cell);
-            let is_cursor = r == cursor_row && c == cursor_col;
+            let is_cursor = cursor_visible && r == cursor_row && c == cursor_col;
             if is_cursor {
-                style = style.add_modifier(Modifier::REVERSED);
+                style = Style::default()
+                    .fg(Color::Gray)
+                    .bg(Color::White)
+                    .add_modifier(Modifier::DIM);
             }
 
             let text = if is_cursor {
-                "█".to_string()
+                if cell.has_contents() {
+                    cell.contents().to_string()
+                } else {
+                    " ".to_string()
+                }
             } else if cell.has_contents() {
                 cell.contents().to_string()
             } else {
