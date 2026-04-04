@@ -1,16 +1,25 @@
+mod config;
+mod db;
+mod loader;
+
+pub use crate::config::Config;
+pub use crate::db::{Database, DbEncryption};
+
 #[derive(Debug, Clone)]
 pub struct AppState {
     app_name: String,
-    tick_count: u64,
     should_quit: bool,
+    config: Config,
+    db: Database,
 }
 
 impl AppState {
-    pub fn new(app_name: impl Into<String>) -> Self {
+    pub fn new(config: Config, db: Database) -> Self {
         Self {
-            app_name: app_name.into(),
-            tick_count: 0,
+            app_name: "stassh".to_string(),
             should_quit: false,
+            config,
+            db,
         }
     }
 
@@ -18,16 +27,8 @@ impl AppState {
         &self.app_name
     }
 
-    pub fn tick_count(&self) -> u64 {
-        self.tick_count
-    }
-
     pub fn should_quit(&self) -> bool {
         self.should_quit
-    }
-
-    pub fn tick(&mut self) {
-        self.tick_count = self.tick_count.saturating_add(1);
     }
 
     pub fn request_quit(&mut self) {
@@ -37,21 +38,20 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::Config;
+    use crate::db::Database;
+
     use super::AppState;
 
     #[test]
     fn app_state_ticks_and_quits() {
-        let mut app = AppState::new("stassh");
+        let mut app = AppState::new(Config::default(), Database::default());
 
         assert_eq!(app.app_name(), "stassh");
-        assert_eq!(app.tick_count(), 0);
         assert!(!app.should_quit());
 
-        app.tick();
-        app.tick();
         app.request_quit();
 
-        assert_eq!(app.tick_count(), 2);
         assert!(app.should_quit());
     }
 }

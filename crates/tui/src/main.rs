@@ -1,6 +1,8 @@
 use std::io;
 use std::time::Duration;
 
+use anyhow::Result;
+
 use backend::AppState;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
@@ -15,18 +17,37 @@ use ratatui::{
     widgets::{Block, Paragraph},
 };
 
-fn main() -> io::Result<()> {
-    run()
+enum Screen {
+    LoadingLogo,
+    OnboardingWantsEncryption,
+    OnboardingWantsPassphrase,
+    AskingPassphrase,
+    Dashboard,
 }
 
-fn run() -> io::Result<()> {
+fn main() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = AppState::new("stassh");
+    // TODO: load config and db, pass to app state
+    let config = backend::Config::load_config();
+    match config.db_encryption {
+        None => {
+            // ask user if they want to encrypt the db, if yes, ask for passphrase and create new db with encryption
+            // if no, create new db without encryption
+        }
+        Some(backend::DbEncryption::None) => {
+            // load db without encryption
+        }
+        Some(backend::DbEncryption::Passphrase) => {
+            // ask for passphrase, load db with encryption
+        }
+    }
+
+    let mut app = AppState::new(config, backend::Database::default());
     let app_result = run_app(&mut terminal, &mut app);
 
     disable_raw_mode()?;
@@ -37,7 +58,8 @@ fn run() -> io::Result<()> {
     )?;
     terminal.show_cursor()?;
 
-    app_result
+    app_result?;
+    Ok(())
 }
 
 fn run_app(
@@ -58,12 +80,10 @@ fn run_app(
                 if key.kind == KeyEventKind::Press {
                     match key.code {
                         KeyCode::Char('q') => app.request_quit(),
-                        _ => app.tick(),
+                        _ => {}
                     }
                 }
             }
-        } else {
-            app.tick();
         }
     }
 }
@@ -79,12 +99,9 @@ fn ui(frame: &mut Frame, app: &AppState) {
     let title = Paragraph::new(Line::from(app.app_name()).style(Style::default().fg(Color::Green)))
         .block(Block::bordered().title("App"));
 
-    let content = Paragraph::new(vec![
-        Line::from(format!("Backend ticks: {}", app.tick_count())),
-        Line::from("Press any key to tick, press q to quit."),
-    ])
-    .block(Block::bordered().title("Dashboard"))
-    .style(Style::default().fg(Color::Cyan));
+    let content = Paragraph::new(vec![Line::from("Press any key to tick, press q to quit.")])
+        .block(Block::bordered().title("Dashboard"))
+        .style(Style::default().fg(Color::Cyan));
 
     let status = Paragraph::new(
         Line::from("crossterm + ratatui workspace scaffold")
