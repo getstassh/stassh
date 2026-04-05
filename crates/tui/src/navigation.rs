@@ -85,6 +85,8 @@ pub(crate) struct DashboardState {
     pub(crate) needs_initial_probe: bool,
     pub(crate) ssh_tabs: Vec<SshSessionState>,
     pub(crate) active_ssh_tab: Option<usize>,
+    pub(crate) debug_hold_started_at: Option<Instant>,
+    pub(crate) debug_hold_last_seen_at: Option<Instant>,
 }
 
 impl DashboardState {
@@ -102,6 +104,8 @@ impl DashboardState {
             needs_initial_probe: true,
             ssh_tabs: Vec::new(),
             active_ssh_tab: None,
+            debug_hold_started_at: None,
+            debug_hold_last_seen_at: None,
         }
     }
 }

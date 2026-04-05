@@ -27,6 +27,8 @@ use crate::{
 mod pages;
 
 const HOST_PROBE_INTERVAL: Duration = Duration::from_secs(20);
+const DEBUG_HOLD_DURATION: Duration = Duration::from_secs(10);
+const DEBUG_HOLD_GAP_RESET: Duration = Duration::from_millis(450);
 
 pub(crate) static HANDLER: ScreenHandler<DashboardState> = ScreenHandler {
     matches: |s| matches!(s, Screen::Dashboard { .. }),
@@ -46,6 +48,15 @@ pub(crate) static HANDLER: ScreenHandler<DashboardState> = ScreenHandler {
 };
 
 fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
+    if let Some(effect) = handle_debug_hold_toggle(key, state) {
+        return Some(effect);
+    }
+
+    if !is_debug_hold_key(key) {
+        state.debug_hold_started_at = None;
+        state.debug_hold_last_seen_at = None;
+    }
+
     if let Some(modal) = &mut state.host_modal {
         return handle_modal_key(app, key, state.selected_host, modal);
     }
@@ -56,15 +67,62 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
     }
 
     if state.quick_switcher.is_some() {
-        return handle_quick_switcher_key(key, state);
+        return handle_quick_switcher_key(key, state, app.config.show_debug_panel);
     }
 
     match state.active_page {
         DashboardPage::Home => pages::home::handle_key(app, key, state),
-        DashboardPage::Debug => pages::debug::handle_key(key, state),
+        DashboardPage::Debug => {
+            if app.config.show_debug_panel {
+                pages::debug::handle_key(key, state)
+            } else {
+                state.active_page = DashboardPage::Home;
+                None
+            }
+        }
         DashboardPage::Ssh => pages::ssh::handle_key(key, state),
         DashboardPage::Settings | DashboardPage::Credits => None,
     }
+}
+
+fn handle_debug_hold_toggle(key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
+    if !is_debug_hold_key(key) {
+        return None;
+    }
+
+    let now = Instant::now();
+    if let Some(last_seen) = state.debug_hold_last_seen_at
+        && now.duration_since(last_seen) > DEBUG_HOLD_GAP_RESET
+    {
+        state.debug_hold_started_at = Some(now);
+    }
+
+    if state.debug_hold_started_at.is_none() {
+        state.debug_hold_started_at = Some(now);
+    }
+    state.debug_hold_last_seen_at = Some(now);
+
+    if let Some(started_at) = state.debug_hold_started_at
+        && now.duration_since(started_at) >= DEBUG_HOLD_DURATION
+    {
+        state.debug_hold_started_at = None;
+        state.debug_hold_last_seen_at = None;
+
+        return Some(Box::new(|app| app.toggle_debug_panel()));
+    }
+
+    None
+}
+
+fn is_debug_hold_key(key: KeyEvent) -> bool {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return false;
+    }
+
+    matches!(key.code, KeyCode::Char('d') | KeyCode::Char('D'))
 }
 
 fn handle_paste(_app: &AppState, text: &str, state: &mut DashboardState) -> Option<AppEffect> {
@@ -399,7 +457,10 @@ struct QuickSwitchItem {
     target: QuickSwitchTarget,
 }
 
-fn build_quick_switch_items(state: &DashboardState) -> Vec<QuickSwitchItem> {
+fn build_quick_switch_items(
+    state: &DashboardState,
+    show_debug_panel: bool,
+) -> Vec<QuickSwitchItem> {
     let mut items = Vec::new();
     let mut number = 1;
 
@@ -425,12 +486,15 @@ fn build_quick_switch_items(state: &DashboardState) -> Vec<QuickSwitchItem> {
         target: QuickSwitchTarget::Page(DashboardPage::Settings),
     });
     number += 1;
-    items.push(QuickSwitchItem {
-        number,
-        label: "Debug".to_string(),
-        target: QuickSwitchTarget::Page(DashboardPage::Debug),
-    });
-    number += 1;
+    if show_debug_panel {
+        items.push(QuickSwitchItem {
+            number,
+            label: "Debug".to_string(),
+            target: QuickSwitchTarget::Page(DashboardPage::Debug),
+        });
+        number += 1;
+    }
+
     items.push(QuickSwitchItem {
         number,
         label: "Credits".to_string(),
@@ -479,8 +543,12 @@ fn activate_quick_switch_target(state: &mut DashboardState, target: QuickSwitchT
     state.quick_switcher = None;
 }
 
-fn handle_quick_switcher_key(key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
-    let items = build_quick_switch_items(state);
+fn handle_quick_switcher_key(
+    key: KeyEvent,
+    state: &mut DashboardState,
+    show_debug_panel: bool,
+) -> Option<AppEffect> {
+    let items = build_quick_switch_items(state, show_debug_panel);
 
     let filtered_indices = filtered_quick_switch_indices(state, &items);
     let selected_idx = state
@@ -536,7 +604,7 @@ fn handle_quick_switcher_key(key: KeyEvent, state: &mut DashboardState) -> Optio
 
 fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
     let a = frame.area();
-    let footer = keybind_hint(state);
+    let footer = keybind_hint(state, app, a);
     let (inner, area) = full_rect(a, "Stassh Command Deck", footer);
     frame.render_widget(inner, a);
     let content_block = frame_block();
@@ -546,7 +614,13 @@ fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
     match state.active_page {
         DashboardPage::Home => pages::home::render(frame, content_area, app, state),
         DashboardPage::Settings => pages::settings::render(frame, content_area, app),
-        DashboardPage::Debug => pages::debug::render(frame, content_area, app, state),
+        DashboardPage::Debug => {
+            if app.config.show_debug_panel {
+                pages::debug::render(frame, content_area, app, state)
+            } else {
+                pages::home::render(frame, content_area, app, state)
+            }
+        }
         DashboardPage::Credits => pages::credits::render(frame, content_area),
         DashboardPage::Ssh => pages::ssh::render(frame, a, content_area, state),
     }
@@ -556,16 +630,21 @@ fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
     }
 
     if state.quick_switcher.is_some() {
-        render_quick_switcher_modal(frame, a, state);
+        render_quick_switcher_modal(frame, a, state, app.config.show_debug_panel);
     }
 }
 
-fn render_quick_switcher_modal(frame: &mut Frame, app_area: Rect, state: &DashboardState) {
+fn render_quick_switcher_modal(
+    frame: &mut Frame,
+    app_area: Rect,
+    state: &DashboardState,
+    show_debug_panel: bool,
+) {
     let width = (app_area.width.saturating_sub(8)).min(90);
     let height = 18;
     let popup_area = centered_rect_no_border(width, height, app_area);
 
-    let items = build_quick_switch_items(state);
+    let items = build_quick_switch_items(state, show_debug_panel);
     let filtered_indices = filtered_quick_switch_indices(state, &items);
     let selected = state
         .quick_switcher
@@ -589,7 +668,7 @@ fn render_quick_switcher_modal(frame: &mut Frame, app_area: Rect, state: &Dashbo
 
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Min(0)])
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
         .split(inner);
 
     frame.render_widget(
@@ -718,7 +797,7 @@ fn modal_line(label: &str, value: &str, selected: bool) -> String {
     format!("{prefix} {label:10} {value}")
 }
 
-fn keybind_hint(state: &DashboardState) -> &'static str {
+fn keybind_hint(state: &DashboardState, app: &AppState, area: Rect) -> &'static str {
     if state.host_modal.is_some() {
         return "HOST form: Tab/Shift+Tab move field | Ctrl+S save | Esc cancel/exit";
     }
@@ -730,7 +809,7 @@ fn keybind_hint(state: &DashboardState) -> &'static str {
     match state.active_page {
         DashboardPage::Home => pages::home::footer_hint(),
         DashboardPage::Settings => "Ctrl+Q quick switch | Esc exit",
-        DashboardPage::Debug => pages::debug::footer_hint(),
+        DashboardPage::Debug => pages::debug::footer_hint(pages::debug::has_scrollbar(app, area)),
         DashboardPage::Credits => "Ctrl+Q quick switch | Esc exit",
         DashboardPage::Ssh => pages::ssh::footer_hint(),
     }

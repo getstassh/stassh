@@ -15,6 +15,7 @@ pub struct Config {
     pub version: &'static str,
     pub enable_telemetry: Option<bool>,
     pub db_encryption: Option<DbEncryption>,
+    pub show_debug_panel: bool,
     pub ssh_idle_timeout_seconds: u64,
     pub ssh_connect_timeout_seconds: u64,
 }
@@ -25,6 +26,7 @@ impl Config {
             version: LATEST_CONFIG_VERSION,
             enable_telemetry: None,
             db_encryption: None,
+            show_debug_panel: false,
             ssh_idle_timeout_seconds: 600,
             ssh_connect_timeout_seconds: 5,
         }

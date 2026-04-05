@@ -73,7 +73,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
         if event::poll(key_rate)? {
             match event::read()? {
                 Event::Key(key) => {
-                    if key.kind == KeyEventKind::Press {
+                    if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat {
                         if key.code == KeyCode::Esc && !app.is_ssh_screen() && !app.has_modal_open()
                         {
                             return Ok(());
