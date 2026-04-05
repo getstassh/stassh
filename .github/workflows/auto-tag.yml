@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   tag:
@@ -29,12 +30,15 @@ jobs:
           echo "new=${new_version}" >> "$GITHUB_OUTPUT"
 
       - name: Create tag if missing
+        id: tag
         shell: bash
         run: |
           new_version="${{ steps.versions.outputs.new }}"
           tag="v${new_version}"
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "Tag ${tag} already exists, skipping."
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            echo "tag=${tag}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -42,3 +46,12 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "${tag}" "${{ github.sha }}"
           git push origin "${tag}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger release workflow
+        if: steps.tag.outputs.created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run release.yml --ref "${{ steps.tag.outputs.tag }}"
