@@ -1,6 +1,6 @@
 pub(crate) fn button<'a>(label: &'a str, is_selected: bool) -> String {
     if is_selected {
-        format!("[ {} ]", label)
+        format!("> {} <", label)
     } else {
         format!("  {}  ", label)
     }

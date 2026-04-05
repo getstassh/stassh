@@ -1,11 +1,6 @@
 use backend::AppState;
 use crossterm::event::KeyEvent;
-use ratatui::{
-    Frame,
-    layout::{Alignment, Constraint, Direction, Layout},
-    style::{Color, Style},
-    widgets::Paragraph,
-};
+use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
 
 use crate::{
     inputs::{handle_pasted_text, handle_text_input},
@@ -14,7 +9,7 @@ use crate::{
         AppEffect, ScreenHandler,
         components::{LogoType, render_logo},
     },
-    ui::{centered_rect, full_rect, line_with_caret},
+    ui::{accent_text, centered_rect, danger_text, full_rect, line_with_caret, text},
 };
 
 pub(crate) static HANDLER: ScreenHandler<StringState> = ScreenHandler {
@@ -70,33 +65,37 @@ fn handle_paste(_: &AppState, text: &str, state: &mut StringState) -> Option<App
 fn ui(frame: &mut Frame, _app: &AppState, state: &StringState) {
     let a = frame.area();
 
-    let (inner, area) = full_rect(a, "Enter Passphrase", "Type passphrase | Enter confirm");
+    let (inner, area) = full_rect(a, "Stassh", "Type passphrase | Enter confirm");
 
     frame.render_widget(inner, a);
 
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
+    let split = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
         .constraints([
-            Constraint::Min(0),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(3),
+            ratatui::layout::Constraint::Min(0),
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Length(3),
+            ratatui::layout::Constraint::Min(0),
         ])
         .split(area);
-
-    render_logo(frame, layout[0], LogoType::WithCredits);
+    render_logo(frame, split[0], LogoType::WithCredits);
 
     if let Some(error) = &state.error {
         let error = Paragraph::new(error.clone())
             .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::Red));
-        frame.render_widget(error, layout[1]);
+            .style(danger_text());
+        frame.render_widget(error, split[1]);
     }
 
-    let question = Paragraph::new("Enter your passphrase:").alignment(Alignment::Center);
-    frame.render_widget(question, layout[2]);
-    let (text_box, text_box_area, text_area) = centered_rect(50, 3, layout[3]);
+    let question = Paragraph::new("Enter your passphrase:")
+        .alignment(Alignment::Center)
+        .style(text());
+    frame.render_widget(question, split[2]);
+    let (text_box, text_box_area, text_area) = centered_rect(56, 3, split[3]);
     frame.render_widget(text_box, text_box_area);
-    let passphrase = Paragraph::new(line_with_caret(state)).alignment(Alignment::Left);
+    let passphrase = Paragraph::new(line_with_caret(state))
+        .alignment(Alignment::Left)
+        .style(accent_text());
     frame.render_widget(passphrase, text_area);
 }

@@ -9,8 +9,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
-    widgets::{Block, Borders, Clear, Paragraph},
+    text::{Line, Span},
+    widgets::{Clear, Paragraph},
 };
 
 use crate::{
@@ -19,7 +19,9 @@ use crate::{
         HostFormState, HostModalMode, HostModalState, HostProbeTask, Screen,
     },
     screens::{AppEffect, ScreenHandler},
-    ui::full_rect,
+    ui::{
+        accent_text, centered_rect_no_border, frame_block, full_rect, modal_block, muted_text, text,
+    },
 };
 
 mod pages;
@@ -535,9 +537,9 @@ fn handle_quick_switcher_key(key: KeyEvent, state: &mut DashboardState) -> Optio
 fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
     let a = frame.area();
     let footer = keybind_hint(state);
-    let (inner, area) = full_rect(a, "Stassh", footer);
+    let (inner, area) = full_rect(a, "Stassh Command Deck", footer);
     frame.render_widget(inner, a);
-    let content_block = Block::default();
+    let content_block = frame_block();
     let content_area = content_block.inner(area);
     frame.render_widget(content_block, area);
 
@@ -578,12 +580,10 @@ fn render_quick_switcher_modal(frame: &mut Frame, app_area: Rect, state: &Dashbo
         .unwrap_or("");
 
     frame.render_widget(Clear, popup_area);
-    let block = Block::default()
-        .title(" Quick Switcher ")
-        .title_bottom(" Type to search | Up/Down select | Enter open | Esc close ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
-        .style(Style::default().bg(Color::Black));
+    let block = modal_block(
+        "Quick Switcher",
+        "Type to search | Up/Down select | Enter open | Esc close",
+    );
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
@@ -592,7 +592,14 @@ fn render_quick_switcher_modal(frame: &mut Frame, app_area: Rect, state: &Dashbo
         .constraints([Constraint::Length(2), Constraint::Min(0)])
         .split(inner);
 
-    frame.render_widget(Paragraph::new(format!("search: {query}")), sections[0]);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("search: ", muted_text()),
+            Span::styled(query, accent_text()),
+        ]))
+        .style(text()),
+        sections[0],
+    );
 
     let visible_count = sections[1].height.saturating_sub(1) as usize;
     let start = selected.saturating_sub(visible_count.saturating_sub(1));
@@ -615,7 +622,9 @@ fn render_quick_switcher_modal(frame: &mut Frame, app_area: Rect, state: &Dashbo
     }
 
     frame.render_widget(
-        Paragraph::new(lines.join("\n")).alignment(Alignment::Left),
+        Paragraph::new(lines.join("\n"))
+            .alignment(Alignment::Left)
+            .style(text()),
         sections[1],
     );
 }
@@ -626,15 +635,13 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
     let popup_area = centered_rect_no_border(width, height, app_area);
 
     frame.render_widget(Clear, popup_area);
-    let block = Block::default()
-        .title(match modal.mode {
-            HostModalMode::Create => " Create Host ",
-            HostModalMode::Edit { .. } => " Edit Host ",
-        })
-        .title_bottom(" Ctrl+S save | Esc cancel | Tab/Shift+Tab next/prev ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
-        .style(Style::default().bg(Color::Black));
+    let block = modal_block(
+        match modal.mode {
+            HostModalMode::Create => "Create Host",
+            HostModalMode::Edit { .. } => "Edit Host",
+        },
+        "Ctrl+S save | Esc cancel | Tab/Shift+Tab next/prev",
+    );
 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
@@ -692,30 +699,10 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
         lines.push(format!("Error: {error}"));
     }
 
-    let content = Paragraph::new(lines.join("\n")).alignment(Alignment::Left);
+    let content = Paragraph::new(lines.join("\n"))
+        .alignment(Alignment::Left)
+        .style(text());
     frame.render_widget(content, inner);
-}
-
-fn centered_rect_no_border(width: u16, height: u16, area: Rect) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(height),
-            Constraint::Fill(1),
-        ])
-        .split(area);
-
-    let horizontal = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(width),
-            Constraint::Fill(1),
-        ])
-        .split(vertical[1]);
-
-    horizontal[1]
 }
 
 fn mask(value: &str) -> String {

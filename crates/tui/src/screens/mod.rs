@@ -1,12 +1,16 @@
 use backend::AppState;
 use crossterm::event::KeyEvent;
-use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
+use ratatui::{
+    Frame,
+    layout::{Alignment, Constraint, Direction, Layout},
+    widgets::Paragraph,
+};
 
 use crate::{
     app::App,
     navigation::Screen,
     screens::components::{LogoType, render_logo},
-    ui::{dual_vertical_rect, full_rect},
+    ui::{accent_text, full_rect, text},
 };
 
 mod asking_passphrase;
@@ -133,12 +137,28 @@ static EMPTY_HANDLER: ScreenHandler<()> = ScreenHandler {
 
         frame.render_widget(inner, a);
 
-        let (top, bottom) = dual_vertical_rect(area);
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(7)])
+            .split(area);
 
-        render_logo(frame, top, LogoType::Simple);
-        let message =
-            Paragraph::new("This screen is not implemented yet :(").alignment(Alignment::Center);
-        frame.render_widget(message, bottom);
+        render_logo(frame, split[0], LogoType::Simple);
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Length(1)])
+            .split(split[1]);
+        frame.render_widget(
+            Paragraph::new("This view is still under construction")
+                .alignment(Alignment::Center)
+                .style(text()),
+            split[0],
+        );
+        frame.render_widget(
+            Paragraph::new("Return with Esc")
+                .alignment(Alignment::Center)
+                .style(accent_text()),
+            split[1],
+        );
     },
     handle_key: |_, _, _| None,
     handle_paste: |_, _, _| None,

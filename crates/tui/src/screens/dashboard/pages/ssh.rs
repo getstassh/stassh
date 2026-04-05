@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Clear, Paragraph},
 };
 
 use crate::{
@@ -14,6 +14,7 @@ use crate::{
     ssh_client::{
         SessionEvent, SessionInput, StartSessionResult, TrustChallenge, start_session_async,
     },
+    ui::{centered_rect_no_border, modal_block, text},
 };
 
 pub(crate) fn handle_key(key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
@@ -228,7 +229,8 @@ pub(crate) fn render(frame: &mut Frame, app_area: Rect, area: Rect, state: &Dash
                     "{spinner} Connecting to {}\n\nPlease wait... ({elapsed:.1}s)",
                     tab.title
                 ))
-                .alignment(Alignment::Center),
+                .alignment(Alignment::Center)
+                .style(text()),
                 area,
             );
         }
@@ -284,12 +286,10 @@ fn render_trust_modal(frame: &mut Frame, app_area: Rect, challenge: &TrustChalle
     let popup_area = centered_rect_no_border(width, height, app_area);
 
     frame.render_widget(Clear, popup_area);
-    let block = Block::default()
-        .title(" Host Key Verification ")
-        .title_bottom(" Y/Enter trust and connect | N/Esc cancel ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
-        .style(Style::default().bg(Color::Black));
+    let block = modal_block(
+        "Host Key Verification",
+        "Y/Enter trust and connect | N/Esc cancel",
+    );
 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
@@ -313,29 +313,12 @@ fn render_trust_modal(frame: &mut Frame, app_area: Rect, challenge: &TrustChalle
         )
     };
 
-    frame.render_widget(Paragraph::new(body).alignment(Alignment::Left), inner);
-}
-
-fn centered_rect_no_border(width: u16, height: u16, area: Rect) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(height),
-            Constraint::Fill(1),
-        ])
-        .split(area);
-
-    let horizontal = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(width),
-            Constraint::Fill(1),
-        ])
-        .split(vertical[1]);
-
-    horizontal[1]
+    frame.render_widget(
+        Paragraph::new(body)
+            .alignment(Alignment::Left)
+            .style(text()),
+        inner,
+    );
 }
 
 fn render_vt100_text(parser: &vt100::Parser) -> Text<'static> {

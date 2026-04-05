@@ -1,12 +1,14 @@
 use backend::AppState;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    layout::{Alignment, Rect},
-    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
+    layout::{Alignment, Rect},
+    style::Style,
+    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
 use crate::navigation::DashboardState;
+use crate::ui::{soft_accent_text, text};
 
 pub(crate) fn handle_key(
     key: KeyEvent,
@@ -33,18 +35,22 @@ pub(crate) fn handle_key(
 
 pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &DashboardState) {
     let debug_text = format!(
-        "Debug\n\nConfig object:\n{:#?}\n\nDB object:\n{:#?}",
+        "DEBUG PANEL\n\nConfig object:\n{:#?}\n\nDB object:\n{:#?}",
         app.config, app.db,
     );
     let text = Paragraph::new(debug_text.clone())
         .alignment(Alignment::Left)
+        .style(text())
         .scroll((state.debug_scroll, 0));
 
     let viewport = area.height.saturating_sub(1) as u16;
     let content_lines = debug_text.lines().count() as u16;
     let max_scroll = content_lines.saturating_sub(viewport);
     let scroll = state.debug_scroll.min(max_scroll);
-    let scrollbar = Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight);
+    let scrollbar = Scrollbar::default()
+        .orientation(ScrollbarOrientation::VerticalRight)
+        .thumb_style(soft_accent_text())
+        .track_style(Style::default());
     let mut scrollbar_state = ScrollbarState::new(max_scroll as usize).position(scroll as usize);
 
     frame.render_widget(text.scroll((scroll, 0)), area);

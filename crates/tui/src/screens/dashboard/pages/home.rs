@@ -3,7 +3,8 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::{Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 
@@ -13,6 +14,10 @@ use crate::{
         HostModalState, SshSessionState,
     },
     screens::AppEffect,
+    ui::{
+        accent_text, border, centered_rect_no_border, danger_text, muted_text,
+        panel_alt_background, selected_border, success_text, text, warning_text,
+    },
 };
 
 const HOME_GRID_COLUMNS: usize = 3;
@@ -73,14 +78,19 @@ pub(crate) fn handle_key(
 
 pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &DashboardState) {
     if app.db.hosts.is_empty() {
-        let message = if let Some(status) = &state.last_status {
-            format!(
-                "No hosts yet.\n\nPress A to create your first SSH host.\n\nLast status: {status}"
-            )
-        } else {
-            "No hosts yet.\n\nPress A to create your first SSH host.".to_string()
-        };
-        frame.render_widget(Paragraph::new(message).alignment(Alignment::Left), area);
+        let center_area = centered_rect_no_border(60, 30, area);
+        let main_text = Paragraph::new("No hosts yet.")
+            .alignment(Alignment::Center)
+            .style(accent_text());
+        let guide_text = Paragraph::new("Press A to register your first SSH target.")
+            .alignment(Alignment::Center)
+            .style(muted_text());
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Length(1)])
+            .split(center_area);
+        frame.render_widget(main_text, layout[0]);
+        frame.render_widget(guide_text, layout[1]);
         return;
     }
 
@@ -89,12 +99,16 @@ pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &Dash
         .constraints([Constraint::Length(2), Constraint::Min(0)])
         .split(area);
 
-    let header = if let Some(status) = &state.last_status {
-        format!("Last status: {status}")
-    } else {
-        "Ready to connect.".to_string()
-    };
-    frame.render_widget(Paragraph::new(header), layout[0]);
+    if let Some(status) = &state.last_status {
+        let header = Line::from(vec![
+            Span::styled("Last status: ", muted_text()),
+            Span::styled(status.clone(), warning_text()),
+        ]);
+        frame.render_widget(
+            Paragraph::new(header).alignment(Alignment::Center),
+            layout[0],
+        );
+    }
 
     let grid_area = layout[1];
     let columns = HOME_GRID_COLUMNS.min(app.db.hosts.len().max(1));
@@ -139,19 +153,26 @@ fn render_host_card(
     selected: bool,
     status: HostConnectionStatus,
 ) {
-    let border = if selected {
-        Style::default().fg(Color::Yellow)
+    let border_style = if selected {
+        selected_border()
     } else if status == HostConnectionStatus::Unreachable {
-        Style::default().fg(Color::Red)
+        danger_text()
     } else {
-        Style::default().fg(Color::DarkGray)
+        border()
     };
 
     let block = Block::default()
-        .title(format!(" {} ", host.name))
+        .title(Line::from(vec![
+            Span::styled(" ", muted_text()),
+            Span::styled(
+                host.name.clone(),
+                if selected { accent_text() } else { text() },
+            ),
+            Span::styled(" ", muted_text()),
+        ]))
         .borders(Borders::ALL)
-        .border_style(border)
-        .style(Style::default());
+        .border_style(border_style)
+        .style(panel_alt_background());
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -161,14 +182,32 @@ fn render_host_card(
         HostAuth::Password { .. } => "password",
     };
 
-    let content = Paragraph::new(format!(
-        "{}@{}:{}\nauth: {}\nstatus: {}",
-        host.user,
-        host.host,
-        host.port,
-        auth_label,
-        host_status_label(status),
-    ));
+    let content = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("endpoint: ", muted_text()),
+            Span::styled(format!("{}@{}:{}", host.user, host.host, host.port), text()),
+        ]),
+        Line::from(vec![
+            Span::styled("auth:     ", muted_text()),
+            Span::styled(auth_label, text()),
+        ]),
+        Line::from(vec![
+            Span::styled("status:   ", muted_text()),
+            Span::styled(
+                host_status_label(status),
+                match status {
+                    HostConnectionStatus::Unknown => muted_text(),
+                    HostConnectionStatus::Reachable => success_text(),
+                    HostConnectionStatus::Unreachable => danger_text(),
+                },
+            ),
+        ]),
+    ])
+    .style(Style::default().add_modifier(if selected {
+        Modifier::BOLD
+    } else {
+        Modifier::empty()
+    }));
     frame.render_widget(content, inner);
 }
 

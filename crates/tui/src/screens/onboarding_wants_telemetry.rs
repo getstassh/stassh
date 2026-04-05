@@ -5,8 +5,11 @@ use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
 use crate::{
     inputs::handle_yes_no_input,
     navigation::{Screen, YesNoState},
-    screens::{AppEffect, ScreenHandler},
-    ui::{button, dual_vertical_rect, full_rect},
+    screens::{
+        AppEffect, ScreenHandler,
+        components::{LogoType, render_logo},
+    },
+    ui::{accent_text, button, full_rect, muted_text, text},
 };
 
 pub(crate) static HANDLER: ScreenHandler<YesNoState> = ScreenHandler {
@@ -50,17 +53,35 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &YesNoState) {
 
     frame.render_widget(inner, a);
 
-    let question =
-        Paragraph::new("Do you want to share anonymous telemetry?").alignment(Alignment::Center);
+    let question = Paragraph::new("Share anonymous hosts count for our website? Just an integer.")
+        .alignment(Alignment::Center)
+        .style(text());
 
     let buttons = Paragraph::new(format!(
         "{} {}",
         button("Yes", state.is_yes()),
         button("No", state.is_no()),
     ))
-    .alignment(Alignment::Center);
+    .alignment(Alignment::Center)
+    .style(accent_text());
 
-    let (top, bottom) = dual_vertical_rect(area);
-    frame.render_widget(question, top);
-    frame.render_widget(buttons, bottom);
+    let note = Paragraph::new("No hostnames, usernames, or credentials are included.")
+        .alignment(Alignment::Center)
+        .style(muted_text());
+
+    let split = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            ratatui::layout::Constraint::Min(0),
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Min(0),
+        ])
+        .split(area);
+
+    render_logo(frame, split[0], LogoType::Simple);
+
+    frame.render_widget(question, split[1]);
+    frame.render_widget(note, split[2]);
+    frame.render_widget(buttons, split[3]);
 }

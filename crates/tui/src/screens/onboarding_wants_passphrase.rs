@@ -5,8 +5,11 @@ use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
 use crate::{
     inputs::{handle_pasted_text, handle_text_input},
     navigation::{Screen, StringState},
-    screens::{AppEffect, ScreenHandler},
-    ui::{centered_rect, dual_vertical_rect, full_rect, line_with_caret},
+    screens::{
+        AppEffect, ScreenHandler,
+        components::{LogoType, render_logo},
+    },
+    ui::{accent_text, centered_rect, full_rect, line_with_caret, muted_text, text},
 };
 
 pub(crate) static HANDLER: ScreenHandler<StringState> = ScreenHandler {
@@ -61,11 +64,35 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &StringState) {
 
     frame.render_widget(inner, a);
 
-    let question = Paragraph::new("Enter your passphrase:").alignment(Alignment::Center);
-    let (top, bottom) = dual_vertical_rect(area);
-    frame.render_widget(question, top);
-    let (text_box, text_box_area, text_area) = centered_rect(50, 3, bottom);
+    let question = Paragraph::new("Create your encryption passphrase")
+        .alignment(Alignment::Center)
+        .style(text());
+    let split = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            ratatui::layout::Constraint::Min(0),
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Length(3),
+            ratatui::layout::Constraint::Min(0),
+        ])
+        .split(area);
+    render_logo(frame, split[0], LogoType::Simple);
+    frame.render_widget(question, split[1]);
+    let task = Paragraph::new("Use a strong phrase you can remember.")
+        .alignment(Alignment::Center)
+        .style(text());
+    frame.render_widget(task, split[1]);
+
+    let note = Paragraph::new("Make sure to remember it!")
+        .alignment(Alignment::Center)
+        .style(muted_text());
+    frame.render_widget(note, split[2]);
+
+    let (text_box, text_box_area, text_area) = centered_rect(56, 3, split[3]);
     frame.render_widget(text_box, text_box_area);
-    let passphrase = Paragraph::new(line_with_caret(state)).alignment(Alignment::Left);
+    let passphrase = Paragraph::new(line_with_caret(state))
+        .alignment(Alignment::Left)
+        .style(accent_text());
     frame.render_widget(passphrase, text_area);
 }

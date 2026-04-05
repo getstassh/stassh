@@ -7,6 +7,8 @@ use ratatui::{
     widgets::Paragraph,
 };
 
+use crate::ui::muted_text;
+
 const LOGO_XS: &str = include_str!("../../../ascii-art-xs.txt");
 const LOGO_LG: &str = include_str!("../../../ascii-art-lg.txt");
 const LOGO_MD: &str = include_str!("../../../ascii-art-md.txt");
@@ -87,15 +89,15 @@ fn render_logo_size(
     area_height: usize,
     logo_type: LogoType,
 ) {
-    let white = hex_color(0xFFFFFF);
-    let orange = hex_color(0xE77500);
+    let light = hex_color(0xE2D9CA);
+    let amber = hex_color(0xE3903E);
 
     let mut lines = Vec::new();
     for raw_line in &logo.lines {
         let (left, right) = split_with_width(raw_line, logo.split_col, area_width);
         lines.push(Line::from(vec![
-            Span::styled(left, Style::default().fg(white)),
-            Span::styled(right, Style::default().fg(orange)),
+            Span::styled(left, Style::default().fg(light)),
+            Span::styled(right, Style::default().fg(amber)),
         ]));
     }
 
@@ -103,7 +105,7 @@ fn render_logo_size(
         if logo.height() > 1 {
             lines.insert(0, Line::from(Span::raw("")));
         }
-        lines.push(Line::from(Span::styled(CREDIT, Style::default().fg(white))));
+        lines.push(Line::from(Span::styled(CREDIT, muted_text())));
     }
 
     let art = Paragraph::new(Text::from(lines)).alignment(Alignment::Center);
