@@ -125,7 +125,7 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
         KeyCode::Down | KeyCode::Char('j') => {
             state.selected_host = move_down(state.selected_host, app.db.hosts.len());
         }
-        KeyCode::Enter | KeyCode::Char('c') => {
+        KeyCode::Enter => {
             if let Some(host) = app.db.hosts.get(state.selected_host) {
                 let host_id = host.id;
                 let title = format!("{}@{}:{}", host.user, host.host, host.port);
@@ -631,7 +631,7 @@ fn render_host_card(frame: &mut Frame, area: Rect, host: &SshHost, selected: boo
     };
 
     let content = Paragraph::new(format!(
-        "{}@{}:{}\nauth: {}\n[e] edit  [enter/c] connect",
+        "{}@{}:{}\nauth: {}\n[e] edit  [enter] connect",
         host.user, host.host, host.port, auth_label
     ));
     frame.render_widget(content, inner);
@@ -759,7 +759,7 @@ fn keybind_hint(state: &DashboardState, sidebar_visible: bool) -> &'static str {
 
     match state.active_page {
         DashboardPage::Home => {
-            "HOME: arrows or hjkl move | A add | E edit | Enter/C connect | Ctrl+B toggle sidebar | Esc exit"
+            "HOME: arrows or hjkl move | A add | E edit | Enter connect | Ctrl+B toggle sidebar | Esc exit"
         }
         DashboardPage::Settings => "Ctrl+B toggle sidebar | Esc exit",
         DashboardPage::Debug => {

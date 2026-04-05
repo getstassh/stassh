@@ -211,7 +211,7 @@ fn trust_host_key(app: &mut crate::app::App, key: TrustedHostKey) {
 fn ui(frame: &mut Frame, _app: &AppState, state: &SshSessionState) {
     let a = frame.area();
     let help = match &state.phase {
-        SshSessionPhase::Starting { .. } => "Connecting... Esc cancel",
+        SshSessionPhase::Starting { .. } => "Connecting... | Esc cancel",
         SshSessionPhase::TrustPrompt { .. } => "Y/Enter trust, N/Esc cancel",
         SshSessionPhase::Running { .. } => "Esc disconnect",
     };
