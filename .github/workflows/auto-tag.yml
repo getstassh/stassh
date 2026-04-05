@@ -19,32 +19,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine previous and current versions
+      - name: Read current version
         id: versions
         shell: bash
         run: |
-          old_commit="${{ github.event.before }}"
-          if [ "${old_commit}" = "0000000000000000000000000000000000000000" ]; then
-            old_version=""
-          else
-            old_version="$({ git show "${old_commit}:crates/tui/Cargo.toml"; } | python -c "import sys,tomllib; print(tomllib.loads(sys.stdin.read())['package']['version'])")"
-          fi
+          new_version=$(python -c "import tomllib; print(tomllib.load(open('crates/tui/Cargo.toml','rb'))['package']['version'])")
 
-          new_version="$(python -c "import tomllib; print(tomllib.load(open('crates/tui/Cargo.toml','rb'))['package']['version'])")"
-
-          echo "old=${old_version}" >> "$GITHUB_OUTPUT"
           echo "new=${new_version}" >> "$GITHUB_OUTPUT"
 
-      - name: Create Git tag for new version
-        if: steps.versions.outputs.old != steps.versions.outputs.new
+      - name: Create tag if missing
         shell: bash
         run: |
           new_version="${{ steps.versions.outputs.new }}"
-          if [ -z "${new_version}" ]; then
-            echo "New version is empty, skipping tag creation."
-            exit 0
-          fi
-
           tag="v${new_version}"
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
             echo "Tag ${tag} already exists, skipping."
