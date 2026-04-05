@@ -7,9 +7,9 @@ use crate::{
     navigation::{Screen, StringState},
     screens::{
         AppEffect, ScreenHandler,
-        components::{LogoType, render_logo},
+        components::{LogoType, page_with_logo},
     },
-    ui::{accent_text, centered_rect, danger_text, full_rect, line_with_caret, text},
+    ui::{accent_text, centered_rect, danger_text, line_with_caret, text},
 };
 
 pub(crate) static HANDLER: ScreenHandler<StringState> = ScreenHandler {
@@ -63,36 +63,37 @@ fn handle_paste(_: &AppState, text: &str, state: &mut StringState) -> Option<App
 }
 
 fn ui(frame: &mut Frame, _app: &AppState, state: &StringState) {
-    let a = frame.area();
-
-    let (inner, area) = full_rect(a, "Stassh", "Type passphrase | Enter confirm");
-
-    frame.render_widget(inner, a);
+    let area = page_with_logo(
+        frame,
+        frame.area(),
+        LogoType::WithCredits,
+        "Stassh",
+        "Type passphrase | Enter confirm",
+    );
 
     let split = ratatui::layout::Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
         .constraints([
-            ratatui::layout::Constraint::Min(0),
             ratatui::layout::Constraint::Length(1),
             ratatui::layout::Constraint::Length(1),
             ratatui::layout::Constraint::Length(3),
             ratatui::layout::Constraint::Min(0),
         ])
         .split(area);
-    render_logo(frame, split[0], LogoType::WithCredits);
 
     if let Some(error) = &state.error {
         let error = Paragraph::new(error.clone())
             .alignment(Alignment::Center)
             .style(danger_text());
-        frame.render_widget(error, split[1]);
+        frame.render_widget(error, split[0]);
     }
 
     let question = Paragraph::new("Enter your passphrase:")
         .alignment(Alignment::Center)
         .style(text());
-    frame.render_widget(question, split[2]);
-    let (text_box, text_box_area, text_area) = centered_rect(56, 3, split[3]);
+    frame.render_widget(question, split[1]);
+
+    let (text_box, text_box_area, text_area) = centered_rect(56, 3, split[2]);
     frame.render_widget(text_box, text_box_area);
     let passphrase = Paragraph::new(line_with_caret(state))
         .alignment(Alignment::Left)

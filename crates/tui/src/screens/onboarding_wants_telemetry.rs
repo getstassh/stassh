@@ -7,9 +7,9 @@ use crate::{
     navigation::{Screen, YesNoState},
     screens::{
         AppEffect, ScreenHandler,
-        components::{LogoType, render_logo},
+        components::{LogoType, page_with_logo, paragraph_with_note},
     },
-    ui::{accent_text, button, full_rect, muted_text, text},
+    ui::{accent_text, button},
 };
 
 pub(crate) static HANDLER: ScreenHandler<YesNoState> = ScreenHandler {
@@ -43,19 +43,29 @@ fn handle_key(_: &AppState, key: KeyEvent, state: &mut YesNoState) -> Option<App
 }
 
 fn ui(frame: &mut Frame, _app: &AppState, state: &YesNoState) {
-    let a = frame.area();
-
-    let (inner, area) = full_rect(
-        a,
+    let area = page_with_logo(
+        frame,
+        frame.area(),
+        LogoType::Simple,
         "Welcome to stassh!",
         "←/→ or Tab switch | Enter confirm | Y/N quick answer",
     );
 
-    frame.render_widget(inner, a);
+    let split = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            ratatui::layout::Constraint::Length(2),
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Min(0),
+        ])
+        .split(area);
 
-    let question = Paragraph::new("Share anonymous hosts count for our website? Just an integer.")
-        .alignment(Alignment::Center)
-        .style(text());
+    paragraph_with_note(
+        frame,
+        split[0],
+        "Share anonymous hosts count for our website? Just an integer.",
+        "No hostnames, usernames, or credentials are included.",
+    );
 
     let buttons = Paragraph::new(format!(
         "{} {}",
@@ -64,24 +74,5 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &YesNoState) {
     ))
     .alignment(Alignment::Center)
     .style(accent_text());
-
-    let note = Paragraph::new("No hostnames, usernames, or credentials are included.")
-        .alignment(Alignment::Center)
-        .style(muted_text());
-
-    let split = ratatui::layout::Layout::default()
-        .direction(ratatui::layout::Direction::Vertical)
-        .constraints([
-            ratatui::layout::Constraint::Min(0),
-            ratatui::layout::Constraint::Length(1),
-            ratatui::layout::Constraint::Length(1),
-            ratatui::layout::Constraint::Min(0),
-        ])
-        .split(area);
-
-    render_logo(frame, split[0], LogoType::Simple);
-
-    frame.render_widget(question, split[1]);
-    frame.render_widget(note, split[2]);
-    frame.render_widget(buttons, split[3]);
+    frame.render_widget(buttons, split[1]);
 }
