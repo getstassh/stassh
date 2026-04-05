@@ -102,9 +102,6 @@ fn render_logo_size(
     }
 
     if area_height >= logo.height() + 2 && matches!(logo_type, LogoType::WithCredits) {
-        if logo.height() > 1 {
-            lines.insert(0, Line::from(Span::raw("")));
-        }
         lines.push(Line::from(Span::styled(CREDIT, muted_text())));
     }
 

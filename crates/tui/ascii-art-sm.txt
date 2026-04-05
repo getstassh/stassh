@@ -1,8 +1,7 @@
                     0
-          WW                            
-   WWWWW WWWWW WWWWWiWWWWWvWWWWWWT      
-  cW      WW      WWiW    WW    WTWWWc  
-    WWWW  WW  pWWWWW !WWWW YWWWWWT  Wc  
-       W  WW  hW  WW    vW    hWWT  Wc  
-  FXXXv     XX  oo ooooo  oooo  oT  ov  
-  
+          WW                          
+   WWWWW WWWWW WWWWWiWWWWWvWWWWWWT    
+  cW      WW      WWiW    WW    WTWWWc
+    WWWW  WW  pWWWWW !WWWW YWWWWWT  Wc
+       W  WW  hW  WW    vW    hWWT  Wc
+  FXXXv     XX  oo ooooo  oooo  oT  ov
