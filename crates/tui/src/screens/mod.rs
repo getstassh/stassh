@@ -19,6 +19,7 @@ mod dashboard;
 mod onboarding_wants_encryption;
 mod onboarding_wants_passphrase;
 mod onboarding_wants_telemetry;
+mod startup_update;
 
 type AppEffect = Box<dyn FnOnce(&mut App)>;
 
@@ -120,6 +121,7 @@ impl<S: 'static> AnyScreenHandler for ScreenHandler<S> {
 
 static HANDLERS: &[&dyn AnyScreenHandler] = &[
     &dashboard::HANDLER,
+    &startup_update::HANDLER,
     &onboarding_wants_encryption::HANDLER,
     &onboarding_wants_passphrase::HANDLER,
     &onboarding_wants_telemetry::HANDLER,

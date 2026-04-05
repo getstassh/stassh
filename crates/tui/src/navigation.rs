@@ -3,6 +3,8 @@ use std::{collections::HashMap, thread::JoinHandle, time::Instant};
 use crate::ssh_client::{LiveSshSession, PendingSshStart, TrustChallenge};
 
 pub(crate) enum Screen {
+    StartupUpdateCheck { state: StartupUpdateState },
+    StartupUpdatePrompt { state: StartupUpdateState },
     OnboardingWantsEncryption { state: YesNoState },
     OnboardingWantsPassphrase { state: StringState },
     OnboardingWantsTelemetry { state: YesNoState },
@@ -86,6 +88,50 @@ pub(crate) struct DashboardState {
     pub(crate) active_ssh_tab: Option<usize>,
     pub(crate) debug_hold_started_at: Option<Instant>,
     pub(crate) debug_hold_last_seen_at: Option<Instant>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum StartupUpdatePhase {
+    Checking,
+    Prompt,
+    Downloading,
+    Verifying,
+    Installing,
+    Done,
+    Failed,
+}
+
+#[derive(Debug)]
+pub(crate) struct StartupUpdateState {
+    pub(crate) phase: StartupUpdatePhase,
+    pub(crate) current_version: String,
+    pub(crate) latest_version: Option<String>,
+    pub(crate) release_url: Option<String>,
+    pub(crate) message: Option<String>,
+    pub(crate) spinner_frame: usize,
+    pub(crate) downloaded: u64,
+    pub(crate) total: Option<u64>,
+    pub(crate) install_receiver: Option<std::sync::mpsc::Receiver<backend::UpdateInstallStatus>>,
+    pub(crate) install_started: bool,
+    pub(crate) skip_for_launch: bool,
+}
+
+impl StartupUpdateState {
+    pub(crate) fn new(current_version: String) -> Self {
+        Self {
+            phase: StartupUpdatePhase::Checking,
+            current_version,
+            latest_version: None,
+            release_url: None,
+            message: None,
+            spinner_frame: 0,
+            downloaded: 0,
+            total: None,
+            install_receiver: None,
+            install_started: false,
+            skip_for_launch: false,
+        }
+    }
 }
 
 impl DashboardState {

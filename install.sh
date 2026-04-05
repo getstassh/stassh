@@ -137,7 +137,7 @@ fi
     exit 1
 }
 
-ASSET_NAME="${BINARY_NAME}-${VERSION#v}-${TARGET}.tar.gz"
+ASSET_NAME="${BINARY_NAME}-${VERSION}-${TARGET}.tar.gz"
 BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
 
 tmp_dir=$(mktemp -d)

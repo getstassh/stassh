@@ -45,6 +45,28 @@ jobs:
           echo "Using release tag: ${tag}"
           echo "release_tag=${tag}" >> "${GITHUB_OUTPUT}"
 
+      - name: Verify tag version matches Cargo.toml
+        shell: bash
+        run: |
+          tag="${{ steps.resolve.outputs.release_tag }}"
+          tag_version="${tag#v}"
+          cargo_version=$(python - <<'PY'
+          import tomllib
+
+          with open('crates/tui/Cargo.toml', 'rb') as f:
+              version = tomllib.load(f)['package']['version']
+          print(version)
+          PY
+          )
+
+          echo "Tag version:   ${tag_version}"
+          echo "Cargo version: ${cargo_version}"
+
+          if [[ "${tag_version}" != "${cargo_version}" ]]; then
+            echo "Release tag (${tag}) does not match crates/tui/Cargo.toml version (${cargo_version})"
+            exit 1
+          fi
+
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
@@ -101,6 +123,7 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
           STASSH_TELEMETRY_SECRET: ${{ secrets.STASSH_TELEMETRY_SECRET }}
+          STASSH_BUILD_TARGET: ${{ matrix.target }}
         run: cargo build --locked --release -p stassh --target ${{ matrix.target }}
 
       - name: Package archive
@@ -140,6 +163,7 @@ jobs:
         run: |
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
+          cp SHA256SUMS stassh-checksums.txt
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -148,3 +172,4 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/SHA256SUMS
+            dist/stassh-checksums.txt

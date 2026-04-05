@@ -1,0 +1,68 @@
+name: Auto Tag On Version Bump
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/tui/Cargo.toml"
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Determine previous and current versions
+        id: versions
+        shell: bash
+        run: |
+          old_commit="${{ github.event.before }}"
+          if [ "${old_commit}" = "0000000000000000000000000000000000000000" ]; then
+            old_version=""
+          else
+            old_version=$(git show "${old_commit}:crates/tui/Cargo.toml" | python - <<'PY'
+            import sys
+            import tomllib
+
+            print(tomllib.loads(sys.stdin.read())['package']['version'])
+            PY
+            )
+          fi
+
+          new_version=$(python - <<'PY'
+          import tomllib
+
+          with open('crates/tui/Cargo.toml', 'rb') as f:
+              print(tomllib.load(f)['package']['version'])
+          PY
+          )
+
+          echo "old=${old_version}" >> "$GITHUB_OUTPUT"
+          echo "new=${new_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Create Git tag for new version
+        if: steps.versions.outputs.old != steps.versions.outputs.new
+        shell: bash
+        run: |
+          new_version="${{ steps.versions.outputs.new }}"
+          if [ -z "${new_version}" ]; then
+            echo "New version is empty, skipping tag creation."
+            exit 0
+          fi
+
+          tag="v${new_version}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "Tag ${tag} already exists, skipping."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${tag}" "${{ github.sha }}"
+          git push origin "${tag}"

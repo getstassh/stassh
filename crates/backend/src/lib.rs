@@ -2,9 +2,15 @@ mod config;
 mod db;
 mod db_crypto;
 mod migrations;
+mod update;
+mod version;
 
 pub use crate::config::Config;
 pub use crate::db::{Database, DbEncryption, HostAuth, SshHost, TrustedHostKey};
+pub use crate::update::{
+    ReleaseAsset, UpdateCheckStatus, UpdateInstallStatus, start_update_install,
+};
+pub use crate::version::{VersionCheckStatus, check_for_updates};
 
 use crate::db::{load_db, save_db};
 
@@ -17,6 +23,8 @@ pub struct AppState {
     pub config: Config,
     pub db: Database,
 
+    pub version_status: VersionCheckStatus,
+
     pub password: Option<String>,
 }
 
@@ -27,6 +35,7 @@ impl AppState {
             app_name: "Stassh".to_string(),
             config,
             db: Database::default(),
+            version_status: VersionCheckStatus::Idle,
             password: None,
         }
     }
