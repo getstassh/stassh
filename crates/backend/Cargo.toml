@@ -18,3 +18,4 @@ ureq = { version = "3.3.0", features = ["json"] }
 sha2 = "0.11.0"
 tar = "0.4.45"
 flate2 = "1.1.5"
+self-replace = "1.5.0"

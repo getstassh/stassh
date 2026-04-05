@@ -68,7 +68,10 @@ fn handle_tick(_: &backend::AppState, state: &mut StartupUpdateState) -> Option<
                 }
                 UpdateInstallStatus::Verifying => state.phase = StartupUpdatePhase::Verifying,
                 UpdateInstallStatus::Installing => state.phase = StartupUpdatePhase::Installing,
-                UpdateInstallStatus::Done => state.phase = StartupUpdatePhase::Done,
+                UpdateInstallStatus::Done => {
+                    state.phase = StartupUpdatePhase::Done;
+                    return Some(Box::new(|app| app.request_restart_and_exit()));
+                }
                 UpdateInstallStatus::Failed(err) => {
                     state.phase = StartupUpdatePhase::Failed;
                     state.message = Some(err);

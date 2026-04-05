@@ -6,7 +6,7 @@ use std::{
     thread,
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use flate2::read::GzDecoder;
 use semver::Version;
 use serde::Deserialize;
@@ -232,44 +232,12 @@ fn extract_archive(archive_path: &Path, temp_dir: &Path) -> Result<PathBuf> {
 }
 
 fn replace_current_binary(new_binary: &Path) -> Result<()> {
-    let current = std::env::current_exe()?;
-    let backup = current.with_extension("bak");
-    let staged = current.with_extension("new");
-
-    if staged.exists() {
-        let _ = fs::remove_file(&staged);
-    }
-    fs::copy(new_binary, &staged)?;
-
-    if backup.exists() {
-        let _ = fs::remove_file(&backup);
-    }
-    fs::copy(&current, &backup)?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&staged)?.permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&staged, perms)?;
-    }
-
-    #[cfg(unix)]
-    {
-        fs::rename(&staged, &current)?;
-    }
-
-    #[cfg(windows)]
-    {
-        let _ = fs::remove_file(&current);
-        fs::rename(&staged, &current)?;
-    }
-
-    if staged.exists() {
-        let _ = fs::remove_file(&staged);
-    }
-
-    Ok(())
+    self_replace::self_replace(new_binary).with_context(|| {
+        format!(
+            "failed to replace running binary with {}",
+            new_binary.display()
+        )
+    })
 }
 
 fn fetch_latest_release() -> Result<LatestRelease> {

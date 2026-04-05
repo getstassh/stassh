@@ -21,6 +21,8 @@ pub(crate) struct App {
     backend: backend::AppState,
     update_receiver: Option<mpsc::Receiver<UpdateCheckStatus>>,
     boot_completed: bool,
+    exit_requested: bool,
+    restart_requested: bool,
 }
 
 impl App {
@@ -49,6 +51,8 @@ impl App {
             backend,
             update_receiver: None,
             boot_completed: false,
+            exit_requested: false,
+            restart_requested: false,
         };
 
         app.start_version_check();
@@ -89,6 +93,19 @@ impl App {
     pub(crate) fn skip_update_gate(&mut self) {
         self.boot_completed = true;
         self.advance_boot_flow();
+    }
+
+    pub(crate) fn request_restart_and_exit(&mut self) {
+        self.restart_requested = true;
+        self.exit_requested = true;
+    }
+
+    pub(crate) fn exit_requested(&self) -> bool {
+        self.exit_requested
+    }
+
+    pub(crate) fn restart_requested(&self) -> bool {
+        self.restart_requested
     }
 
     fn advance_boot_flow(&mut self) {

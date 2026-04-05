@@ -1,4 +1,5 @@
 use std::io;
+use std::process::Command;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -25,6 +26,9 @@ mod telemetry;
 mod ui;
 
 fn main() -> Result<()> {
+    let restart_exe = std::env::current_exe()?;
+    let restart_args: Vec<_> = std::env::args_os().skip(1).collect();
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(
@@ -39,6 +43,7 @@ fn main() -> Result<()> {
 
     let mut app = App::new();
     let app_result = run_app(&mut terminal, &mut app);
+    let should_restart = app.restart_requested();
 
     disable_raw_mode()?;
     execute!(
@@ -51,6 +56,16 @@ fn main() -> Result<()> {
     terminal.show_cursor()?;
 
     app_result?;
+
+    if should_restart {
+        if let Err(err) = Command::new(&restart_exe).args(&restart_args).status() {
+            eprintln!(
+                "Update installed, but automatic restart failed: {}. Please restart stassh manually.",
+                err
+            );
+        }
+    }
+
     Ok(())
 }
 
@@ -71,6 +86,10 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
             app.poll_version_check();
             app.maybe_report_telemetry();
             last_tick_time = std::time::Instant::now();
+
+            if app.exit_requested() {
+                return Ok(());
+            }
         }
 
         if event::poll(key_rate)? {
@@ -83,6 +102,10 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                         }
 
                         handler.handle_key(app, key);
+
+                        if app.exit_requested() {
+                            return Ok(());
+                        }
                     }
                 }
                 Event::Paste(text) => {
