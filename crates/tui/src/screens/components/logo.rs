@@ -93,6 +93,8 @@ fn render_logo_size(
     let amber = hex_color(0xE3903E);
 
     let mut lines = Vec::new();
+    lines.push(Line::from(""));
+
     for raw_line in &logo.lines {
         let (left, right) = split_with_width(raw_line, logo.split_col, area_width);
         lines.push(Line::from(vec![

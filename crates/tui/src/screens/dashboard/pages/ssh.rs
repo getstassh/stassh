@@ -2,7 +2,7 @@ use backend::{AppState, TrustedHostKey};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Clear, Paragraph},
@@ -224,6 +224,18 @@ pub(crate) fn render(frame: &mut Frame, app_area: Rect, area: Rect, state: &Dash
             const FRAMES: [&str; 8] = ["-", "\\", "|", "/", "-", "\\", "|", "/"];
             let spinner = FRAMES[*spinner_frame % FRAMES.len()];
             let elapsed = started_at.elapsed().as_secs_f32();
+            // center widget
+            let split = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints(
+                    [
+                        Constraint::Percentage(50),
+                        Constraint::Length(3),
+                        Constraint::Percentage(50),
+                    ]
+                    .as_ref(),
+                )
+                .split(area);
             frame.render_widget(
                 Paragraph::new(format!(
                     "{spinner} Connecting to {}\n\nPlease wait... ({elapsed:.1}s)",
@@ -231,7 +243,7 @@ pub(crate) fn render(frame: &mut Frame, app_area: Rect, area: Rect, state: &Dash
                 ))
                 .alignment(Alignment::Center)
                 .style(text()),
-                area,
+                split[1],
             );
         }
         SshSessionPhase::TrustPrompt { challenge, .. } => {
