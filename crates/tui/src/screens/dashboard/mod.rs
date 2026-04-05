@@ -248,13 +248,13 @@ fn handle_modal_key(
         }));
     }
 
-    if key.code == KeyCode::Tab || key.code == KeyCode::Down || key.code == KeyCode::Char('j') {
+    if key.code == KeyCode::Tab || key.code == KeyCode::Down {
         modal.form.focus = modal.form.focus.next();
         modal.form.error = None;
         return None;
     }
 
-    if key.code == KeyCode::BackTab || key.code == KeyCode::Up || key.code == KeyCode::Char('k') {
+    if key.code == KeyCode::BackTab || key.code == KeyCode::Up {
         modal.form.focus = modal.form.focus.prev();
         modal.form.error = None;
         return None;
@@ -598,7 +598,7 @@ fn handle_quick_switcher_key(
 fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
     let a = frame.area();
     let footer = keybind_hint(state, app, a);
-    let (inner, area) = full_rect(a, "Stassh Command Deck", footer);
+    let (inner, area) = full_rect(a, "Stassh", footer);
     frame.render_widget(inner, a);
     let content_block = frame_block();
     let content_area = content_block.inner(area);
