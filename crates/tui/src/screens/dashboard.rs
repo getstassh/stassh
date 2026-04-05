@@ -733,7 +733,7 @@ fn render_host_card(
     };
 
     let content = Paragraph::new(format!(
-        "{}@{}:{}\nauth: {}\nstatus: {}\n[e] edit  [enter] connect",
+        "{}@{}:{}\nauth: {}\nstatus: {}",
         host.user,
         host.host,
         host.port,
@@ -874,7 +874,7 @@ fn keybind_hint(state: &DashboardState, sidebar_visible: bool) -> &'static str {
 
     match state.active_page {
         DashboardPage::Home => {
-            "HOME: arrows or hjkl move | A add | E edit | Enter connect | Ctrl+B toggle sidebar | Esc exit"
+            "HOME: arrows or hjkl move | A add | E edit | Enter connect | R refresh | Ctrl+B toggle sidebar | Esc exit"
         }
         DashboardPage::Settings => "Ctrl+B toggle sidebar | Esc exit",
         DashboardPage::Debug => {
