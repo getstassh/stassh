@@ -18,7 +18,7 @@ jobs:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - runner: ubuntu-latest
@@ -72,7 +72,7 @@ jobs:
       - name: Package archive
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${GITHUB_REF_NAME}"
           archive_name="${BINARY_NAME}-${version}-${{ matrix.target }}.tar.gz"
           staging_dir="release/${{ matrix.target }}"
 
