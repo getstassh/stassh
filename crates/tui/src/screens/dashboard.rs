@@ -4,21 +4,26 @@ use std::{
     time::{Duration, Instant},
 };
 
-use backend::{AppState, HostAuth, SshHost};
+use backend::{AppState, HostAuth, SshHost, TrustedHostKey};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
 use crate::{
     navigation::{
         DashboardPage, DashboardState, HostAuthMode, HostConnectionStatus, HostFormField,
-        HostFormState, HostModalMode, HostModalState, HostProbeTask, Screen, SshSessionState,
+        HostFormState, HostModalMode, HostModalState, HostProbeTask, Screen, SshSessionPhase,
+        SshSessionState,
     },
     screens::{AppEffect, ScreenHandler},
+    ssh_client::{
+        SessionEvent, SessionInput, StartSessionResult, TrustChallenge, start_session_async,
+    },
     ui::full_rect,
 };
 
@@ -39,7 +44,7 @@ pub(crate) static HANDLER: ScreenHandler<DashboardState> = ScreenHandler {
     render: ui,
     handle_key,
     handle_paste,
-    handle_resize: |_, _, _, _| None,
+    handle_resize,
     handle_tick,
 };
 
@@ -57,27 +62,48 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
     }
 
     match key.code {
-        KeyCode::Char('1') => state.active_page = DashboardPage::Home,
-        KeyCode::Char('2') => state.active_page = DashboardPage::Settings,
-        KeyCode::Char('3') => state.active_page = DashboardPage::Debug,
-        KeyCode::Char('4') => state.active_page = DashboardPage::Credits,
+        KeyCode::Char('1') => {
+            state.active_page = DashboardPage::Home;
+            state.sidebar_cursor = 0;
+        }
+        KeyCode::Char('2') => {
+            state.active_page = DashboardPage::Settings;
+            state.sidebar_cursor = 1;
+        }
+        KeyCode::Char('3') => {
+            state.active_page = DashboardPage::Debug;
+            state.sidebar_cursor = 2;
+        }
+        KeyCode::Char('4') => {
+            state.active_page = DashboardPage::Credits;
+            state.sidebar_cursor = 3;
+        }
         _ => {}
     }
 
     if app.config.show_sidebar {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                state.active_page = prev_page(state.active_page);
+                state.sidebar_cursor = state.sidebar_cursor.saturating_sub(1);
                 return None;
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                state.active_page = next_page(state.active_page);
+                let max = state.sidebar_items_count().saturating_sub(1);
+                state.sidebar_cursor = (state.sidebar_cursor + 1).min(max);
+                return None;
+            }
+            KeyCode::Enter => {
+                activate_sidebar_selection(state);
                 return None;
             }
             _ => {}
         }
 
         return None;
+    }
+
+    if state.active_page == DashboardPage::Ssh {
+        return handle_ssh_key(key, state);
     }
 
     if state.active_page != DashboardPage::Home {
@@ -136,12 +162,16 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
             if let Some(host) = app.db.hosts.get(state.selected_host) {
                 let host_id = host.id;
                 let title = format!("{}@{}:{}", host.user, host.host, host.port);
-                return Some(Box::new(move |app| {
-                    let (cols, rows) = crossterm::terminal::size().unwrap_or((120, 40));
-                    app.screen = Screen::SshSession {
-                        state: SshSessionState::new_starting(title, rows, cols, host_id),
-                    };
-                }));
+                let rows_cols = crossterm::terminal::size().unwrap_or((120, 40));
+                let rows = rows_cols.1;
+                let cols = rows_cols.0;
+                state
+                    .ssh_tabs
+                    .push(SshSessionState::new_starting(title, rows, cols, host_id));
+                let idx = state.ssh_tabs.len().saturating_sub(1);
+                state.active_ssh_tab = Some(idx);
+                state.active_page = DashboardPage::Ssh;
+                state.sidebar_cursor = DashboardState::FIXED_SIDEBAR_ITEMS + idx;
             }
         }
         _ => {}
@@ -153,11 +183,23 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
 fn handle_paste(_app: &AppState, text: &str, state: &mut DashboardState) -> Option<AppEffect> {
     if let Some(modal) = &mut state.host_modal {
         insert_pasted_text(&mut modal.form, text);
+        return None;
     }
+
+    if state.active_page == DashboardPage::Ssh && state.active_ssh_tab.is_some() {
+        if let Some(tab) = active_ssh_tab_mut(state) {
+            if let SshSessionPhase::Running { live } = &tab.phase {
+                live.send_input(SessionInput::Data(text.as_bytes().to_vec()));
+            }
+        }
+    }
+
     None
 }
 
 fn handle_tick(app: &AppState, state: &mut DashboardState) -> Option<AppEffect> {
+    tick_ssh_tabs(app, state);
+
     reap_probe_tasks(state);
     sync_host_status_maps(app, state);
 
@@ -167,6 +209,29 @@ fn handle_tick(app: &AppState, state: &mut DashboardState) -> Option<AppEffect> 
         start_probe_round(app, state);
         state.last_probe_at = Instant::now();
         state.needs_initial_probe = false;
+    }
+
+    None
+}
+
+fn handle_resize(
+    _app: &AppState,
+    cols: u16,
+    rows: u16,
+    state: &mut DashboardState,
+) -> Option<AppEffect> {
+    if cols == 0 || rows == 0 {
+        return None;
+    }
+
+    for tab in &mut state.ssh_tabs {
+        tab.resize(rows, cols);
+        if let SshSessionPhase::Running { live } = &tab.phase {
+            live.send_input(SessionInput::Resize {
+                cols: cols.max(1),
+                rows: rows.max(1),
+            });
+        }
     }
 
     None
@@ -235,6 +300,195 @@ fn host_is_reachable(host: &str, port: u16, timeout: Duration) -> bool {
     }
 
     false
+}
+
+fn handle_ssh_key(key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
+    let Some(tab_idx) = state.active_ssh_tab else {
+        state.active_page = DashboardPage::Home;
+        state.sidebar_cursor = 0;
+        return None;
+    };
+
+    let Some(tab) = state.ssh_tabs.get_mut(tab_idx) else {
+        state.active_ssh_tab = None;
+        state.active_page = DashboardPage::Home;
+        state.sidebar_cursor = 0;
+        return None;
+    };
+
+    let mut close_status: Option<String> = None;
+    let mut trust_key: Option<(u32, TrustedHostKey)> = None;
+
+    match &mut tab.phase {
+        SshSessionPhase::Starting { pending, .. } => {
+            if key.code == KeyCode::Esc {
+                if let Some(pending) = pending {
+                    pending.cancel();
+                }
+                close_status = Some("Connection canceled".to_string());
+            }
+        }
+        SshSessionPhase::TrustPrompt { host_id, challenge } => {
+            if matches!(key.code, KeyCode::Char('y') | KeyCode::Enter) {
+                trust_key = Some((*host_id, challenge.proposed_key.clone()));
+            }
+
+            if matches!(key.code, KeyCode::Char('n') | KeyCode::Esc) {
+                close_status = Some("Connection canceled: host key not trusted".to_string());
+            }
+        }
+        SshSessionPhase::Running { live } => {
+            if key.code == KeyCode::Esc {
+                live.send_input(SessionInput::Disconnect);
+                return None;
+            }
+
+            if let Some(bytes) = key_to_bytes(key) {
+                live.send_input(SessionInput::Data(bytes));
+            }
+        }
+    }
+
+    if let Some((host_id, key)) = trust_key {
+        if let Some(tab) = state.ssh_tabs.get_mut(tab_idx) {
+            tab.phase = SshSessionPhase::starting(host_id);
+        }
+        return Some(Box::new(move |app| {
+            trust_host_key(app, key);
+        }));
+    }
+
+    if let Some(status) = close_status {
+        close_ssh_tab(state, tab_idx, status);
+    }
+
+    None
+}
+
+fn tick_ssh_tabs(app: &AppState, state: &mut DashboardState) {
+    let mut idx = 0;
+    while idx < state.ssh_tabs.len() {
+        let mut close_status = None;
+        let tab = &mut state.ssh_tabs[idx];
+
+        let mut next_phase = None;
+        match &mut tab.phase {
+            SshSessionPhase::Starting {
+                host_id,
+                pending,
+                spinner_frame,
+                ..
+            } => {
+                *spinner_frame = spinner_frame.wrapping_add(1);
+
+                if pending.is_none() {
+                    if let Some(host) = app.db.hosts.iter().find(|h| h.id == *host_id).cloned() {
+                        *pending = Some(start_session_async(
+                            &host,
+                            &app.db.trusted_host_keys,
+                            tab.last_good_rows,
+                            tab.last_good_cols,
+                            app.config.ssh_idle_timeout_seconds,
+                            app.config.ssh_connect_timeout_seconds,
+                        ));
+                    } else {
+                        close_status = Some("Selected host no longer exists".to_string());
+                    }
+                }
+
+                if close_status.is_none() {
+                    if let Some(pending_start) = pending.as_mut() {
+                        if let Some(result) = pending_start.try_recv() {
+                            match result {
+                                StartSessionResult::Started(live) => {
+                                    next_phase = Some(SshSessionPhase::Running { live });
+                                }
+                                StartSessionResult::TrustRequired(challenge) => {
+                                    next_phase = Some(SshSessionPhase::TrustPrompt {
+                                        host_id: *host_id,
+                                        challenge,
+                                    });
+                                }
+                                StartSessionResult::Error(error) => {
+                                    close_status = Some(error);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            SshSessionPhase::TrustPrompt { .. } => {}
+            SshSessionPhase::Running { live } => {
+                let parser = &mut tab.parser;
+                while let Some(event) = live.try_recv() {
+                    match event {
+                        SessionEvent::OutputBytes(bytes) => parser.process(&bytes),
+                        SessionEvent::Error(error) => {
+                            if close_status.is_none() {
+                                close_status = Some(error);
+                            }
+                        }
+                        SessionEvent::Closed(status) => {
+                            if close_status.is_none() {
+                                close_status = Some(status);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(phase) = next_phase {
+            tab.phase = phase;
+        }
+
+        if let Some(status) = close_status {
+            if let Some(tab) = state.ssh_tabs.get_mut(idx) {
+                if let SshSessionPhase::Running { live } = &mut tab.phase {
+                    live.stop();
+                }
+            }
+            close_ssh_tab(state, idx, status);
+            continue;
+        }
+
+        idx += 1;
+    }
+}
+
+fn close_ssh_tab(state: &mut DashboardState, idx: usize, status: String) {
+    if idx >= state.ssh_tabs.len() {
+        return;
+    }
+
+    state.ssh_tabs.remove(idx);
+    state.last_status = Some(status);
+
+    if state.ssh_tabs.is_empty() {
+        state.active_ssh_tab = None;
+        state.active_page = DashboardPage::Home;
+        state.sidebar_cursor = 0;
+        return;
+    }
+
+    let next_idx = idx.min(state.ssh_tabs.len().saturating_sub(1));
+    state.active_ssh_tab = Some(next_idx);
+    if state.active_page == DashboardPage::Ssh {
+        state.sidebar_cursor = DashboardState::FIXED_SIDEBAR_ITEMS + next_idx;
+    }
+}
+
+fn active_ssh_tab_mut(state: &mut DashboardState) -> Option<&mut SshSessionState> {
+    let idx = state.active_ssh_tab?;
+    state.ssh_tabs.get_mut(idx)
+}
+
+fn trust_host_key(app: &mut crate::app::App, key: TrustedHostKey) {
+    app.db
+        .trusted_host_keys
+        .retain(|k| !(k.host == key.host && k.port == key.port));
+    app.db.trusted_host_keys.push(key);
+    let _ = app.save_db();
 }
 
 fn handle_modal_key(
@@ -519,21 +773,45 @@ fn move_down(selected: usize, hosts_len: usize) -> usize {
     selected
 }
 
-fn next_page(page: DashboardPage) -> DashboardPage {
-    match page {
-        DashboardPage::Home => DashboardPage::Settings,
-        DashboardPage::Settings => DashboardPage::Debug,
-        DashboardPage::Debug => DashboardPage::Credits,
-        DashboardPage::Credits => DashboardPage::Home,
+#[derive(Clone, Copy)]
+enum SidebarTarget {
+    Page(DashboardPage),
+    Session(usize),
+}
+
+fn sidebar_target_for_cursor(state: &DashboardState) -> SidebarTarget {
+    let idx = state
+        .sidebar_cursor
+        .min(state.sidebar_items_count().saturating_sub(1));
+
+    match idx {
+        0 => SidebarTarget::Page(DashboardPage::Home),
+        1 => SidebarTarget::Page(DashboardPage::Settings),
+        2 => SidebarTarget::Page(DashboardPage::Debug),
+        3 => SidebarTarget::Page(DashboardPage::Credits),
+        n => SidebarTarget::Session(n - DashboardState::FIXED_SIDEBAR_ITEMS),
     }
 }
 
-fn prev_page(page: DashboardPage) -> DashboardPage {
-    match page {
-        DashboardPage::Home => DashboardPage::Credits,
-        DashboardPage::Settings => DashboardPage::Home,
-        DashboardPage::Debug => DashboardPage::Settings,
-        DashboardPage::Credits => DashboardPage::Debug,
+fn activate_sidebar_selection(state: &mut DashboardState) {
+    match sidebar_target_for_cursor(state) {
+        SidebarTarget::Page(page) => {
+            state.active_page = page;
+            state.sidebar_cursor = match page {
+                DashboardPage::Home => 0,
+                DashboardPage::Settings => 1,
+                DashboardPage::Debug => 2,
+                DashboardPage::Credits => 3,
+                DashboardPage::Ssh => state.sidebar_cursor,
+            };
+        }
+        SidebarTarget::Session(tab_idx) => {
+            if tab_idx < state.ssh_tabs.len() {
+                state.active_page = DashboardPage::Ssh;
+                state.active_ssh_tab = Some(tab_idx);
+                state.sidebar_cursor = DashboardState::FIXED_SIDEBAR_ITEMS + tab_idx;
+            }
+        }
     }
 }
 
@@ -571,6 +849,7 @@ fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
         DashboardPage::Settings => frame.render_widget(render_settings(app), content_area),
         DashboardPage::Debug => render_debug(frame, content_area, app, state),
         DashboardPage::Credits => frame.render_widget(render_credits(), content_area),
+        DashboardPage::Ssh => render_ssh_workspace(frame, a, content_area, state),
     }
 
     if let Some(modal) = &state.host_modal {
@@ -586,48 +865,79 @@ fn render_sidebar(frame: &mut Frame, area: Rect, state: &DashboardState) {
     let sidebar_area = sidebar_block.inner(area);
     frame.render_widget(sidebar_block, area);
 
+    let mut constraints = vec![Constraint::Length(3); state.sidebar_items_count()];
+    constraints.push(Constraint::Fill(1));
     let nav_areas = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Fill(1),
-        ])
+        .constraints(constraints)
         .split(sidebar_area);
 
-    render_sidebar_item(frame, nav_areas[0], state, DashboardPage::Home, 1, "Home");
+    render_sidebar_item(
+        frame,
+        nav_areas[0],
+        state,
+        0,
+        "Home",
+        SidebarTarget::Page(DashboardPage::Home),
+    );
     render_sidebar_item(
         frame,
         nav_areas[1],
         state,
-        DashboardPage::Settings,
-        2,
+        1,
         "Settings",
+        SidebarTarget::Page(DashboardPage::Settings),
     );
-    render_sidebar_item(frame, nav_areas[2], state, DashboardPage::Debug, 3, "Debug");
+    render_sidebar_item(
+        frame,
+        nav_areas[2],
+        state,
+        2,
+        "Debug",
+        SidebarTarget::Page(DashboardPage::Debug),
+    );
     render_sidebar_item(
         frame,
         nav_areas[3],
         state,
-        DashboardPage::Credits,
-        4,
+        3,
         "Credits",
+        SidebarTarget::Page(DashboardPage::Credits),
     );
+
+    for (session_idx, tab) in state.ssh_tabs.iter().enumerate() {
+        let item_idx = DashboardState::FIXED_SIDEBAR_ITEMS + session_idx;
+        render_sidebar_item(
+            frame,
+            nav_areas[item_idx],
+            state,
+            item_idx,
+            &tab.title,
+            SidebarTarget::Session(session_idx),
+        );
+    }
 }
 
 fn render_sidebar_item(
     frame: &mut Frame,
     area: Rect,
     state: &DashboardState,
-    page: DashboardPage,
-    index: u8,
+    index: usize,
     title: &str,
+    target: SidebarTarget,
 ) {
-    let selected = state.active_page == page;
-    let border = if selected {
+    let cursor_selected = state.sidebar_cursor == index;
+    let active = match target {
+        SidebarTarget::Page(page) => state.active_page == page,
+        SidebarTarget::Session(tab_idx) => {
+            state.active_page == DashboardPage::Ssh && state.active_ssh_tab == Some(tab_idx)
+        }
+    };
+
+    let border = if cursor_selected {
         Style::default().fg(Color::Yellow)
+    } else if active {
+        Style::default().fg(Color::Green)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -635,10 +945,10 @@ fn render_sidebar_item(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let label = if selected {
-        format!("> {} {}", index, title)
+    let label = if cursor_selected {
+        format!("> {} {}", index + 1, title)
     } else {
-        format!("  {} {}", index, title)
+        format!("  {} {}", index + 1, title)
     };
     let text = Paragraph::new(label).alignment(Alignment::Left);
     frame.render_widget(text, inner);
@@ -749,6 +1059,221 @@ fn host_status_label(status: HostConnectionStatus) -> &'static str {
         HostConnectionStatus::Checking => "checking",
         HostConnectionStatus::Reachable => "reachable",
         HostConnectionStatus::Unreachable => "unreachable",
+    }
+}
+
+fn render_ssh_workspace(frame: &mut Frame, app_area: Rect, area: Rect, state: &DashboardState) {
+    let Some(tab_idx) = state.active_ssh_tab else {
+        frame.render_widget(
+            Paragraph::new("No active SSH session. Open one from Home.").alignment(Alignment::Left),
+            area,
+        );
+        return;
+    };
+
+    let Some(tab) = state.ssh_tabs.get(tab_idx) else {
+        frame.render_widget(
+            Paragraph::new("No active SSH session. Open one from Home.").alignment(Alignment::Left),
+            area,
+        );
+        return;
+    };
+
+    match &tab.phase {
+        SshSessionPhase::Starting {
+            spinner_frame,
+            started_at,
+            ..
+        } => {
+            const FRAMES: [&str; 8] = ["-", "\\", "|", "/", "-", "\\", "|", "/"];
+            let spinner = FRAMES[*spinner_frame % FRAMES.len()];
+            let elapsed = started_at.elapsed().as_secs_f32();
+            frame.render_widget(
+                Paragraph::new(format!(
+                    "{spinner} Connecting to {}\n\nPlease wait... ({elapsed:.1}s)",
+                    tab.title
+                ))
+                .alignment(Alignment::Center),
+                area,
+            );
+        }
+        SshSessionPhase::TrustPrompt { challenge, .. } => {
+            frame.render_widget(
+                Paragraph::new(render_vt100_text(&tab.parser)).alignment(Alignment::Left),
+                area,
+            );
+            render_trust_modal(frame, app_area, challenge);
+        }
+        SshSessionPhase::Running { .. } => {
+            frame.render_widget(
+                Paragraph::new(render_vt100_text(&tab.parser)).alignment(Alignment::Left),
+                area,
+            );
+        }
+    }
+}
+
+fn render_trust_modal(frame: &mut Frame, app_area: Rect, challenge: &TrustChallenge) {
+    let width = (app_area.width.saturating_sub(4)).min(90);
+    let height = 12;
+    let popup_area = centered_rect_no_border(width, height, app_area);
+
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .title(" Host Key Verification ")
+        .title_bottom(" Y/Enter trust and connect | N/Esc cancel ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let body = if let Some(previous) = &challenge.previous_fingerprint {
+        format!(
+            "WARNING: host key changed for {}:{}\nOld fingerprint: {}\nNew fingerprint: {}\nAlgorithm: {}",
+            challenge.proposed_key.host,
+            challenge.proposed_key.port,
+            previous,
+            challenge.proposed_key.fingerprint_sha256,
+            challenge.proposed_key.algorithm,
+        )
+    } else {
+        format!(
+            "First connection to {}:{}\nFingerprint: {}\nAlgorithm: {}",
+            challenge.proposed_key.host,
+            challenge.proposed_key.port,
+            challenge.proposed_key.fingerprint_sha256,
+            challenge.proposed_key.algorithm,
+        )
+    };
+
+    frame.render_widget(Paragraph::new(body).alignment(Alignment::Left), inner);
+}
+
+fn render_vt100_text(parser: &vt100::Parser) -> Text<'static> {
+    let screen = parser.screen();
+    let (rows, cols) = screen.size();
+    if rows == 0 || cols == 0 {
+        return Text::from(Vec::<Line<'static>>::new());
+    }
+
+    let (raw_cursor_row, raw_cursor_col) = screen.cursor_position();
+    let cursor_visible = !screen.hide_cursor();
+    let cursor_row = raw_cursor_row.min(rows.saturating_sub(1));
+    let cursor_col = raw_cursor_col.min(cols.saturating_sub(1));
+    let mut lines = Vec::with_capacity(rows as usize);
+
+    for r in 0..rows {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut run = String::new();
+        let mut run_style: Option<Style> = None;
+
+        for c in 0..cols {
+            let Some(cell) = screen.cell(r, c) else {
+                continue;
+            };
+
+            if cell.is_wide_continuation() {
+                continue;
+            }
+
+            let mut style = style_from_cell(cell);
+            let is_cursor = cursor_visible && r == cursor_row && c == cursor_col;
+            if is_cursor {
+                style = Style::default()
+                    .fg(Color::Gray)
+                    .bg(Color::White)
+                    .add_modifier(Modifier::DIM);
+            }
+
+            let text = if is_cursor {
+                if cell.has_contents() {
+                    cell.contents().to_string()
+                } else {
+                    " ".to_string()
+                }
+            } else if cell.has_contents() {
+                cell.contents().to_string()
+            } else {
+                " ".to_string()
+            };
+
+            if run_style == Some(style) {
+                run.push_str(&text);
+            } else {
+                if let Some(prev_style) = run_style {
+                    spans.push(Span::styled(std::mem::take(&mut run), prev_style));
+                }
+                run_style = Some(style);
+                run.push_str(&text);
+            }
+        }
+
+        if let Some(prev_style) = run_style {
+            spans.push(Span::styled(run, prev_style));
+        }
+        lines.push(Line::from(spans));
+    }
+
+    Text::from(lines)
+}
+
+fn style_from_cell(cell: &vt100::Cell) -> Style {
+    let mut style = Style::default();
+
+    style = style.fg(map_color(cell.fgcolor()));
+    style = style.bg(map_color(cell.bgcolor()));
+
+    if cell.bold() {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if cell.dim() {
+        style = style.add_modifier(Modifier::DIM);
+    }
+    if cell.italic() {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    if cell.underline() {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    if cell.inverse() {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
+
+    style
+}
+
+fn map_color(color: vt100::Color) -> Color {
+    match color {
+        vt100::Color::Default => Color::Reset,
+        vt100::Color::Idx(i) => Color::Indexed(i),
+        vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+    }
+}
+
+fn key_to_bytes(key: KeyEvent) -> Option<Vec<u8>> {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        if let KeyCode::Char(c) = key.code {
+            let lower = c.to_ascii_lowercase();
+            if lower.is_ascii_lowercase() {
+                let v = (lower as u8) - b'a' + 1;
+                return Some(vec![v]);
+            }
+        }
+    }
+
+    match key.code {
+        KeyCode::Enter => Some(vec![b'\r']),
+        KeyCode::Tab => Some(vec![b'\t']),
+        KeyCode::Backspace if key.modifiers.contains(KeyModifiers::CONTROL) => Some(vec![0x17]),
+        KeyCode::Backspace => Some(vec![0x7f]),
+        KeyCode::Char(c) => Some(c.to_string().into_bytes()),
+        KeyCode::Up => Some(b"\x1b[A".to_vec()),
+        KeyCode::Down => Some(b"\x1b[B".to_vec()),
+        KeyCode::Right => Some(b"\x1b[C".to_vec()),
+        KeyCode::Left => Some(b"\x1b[D".to_vec()),
+        _ => None,
     }
 }
 
@@ -869,7 +1394,7 @@ fn keybind_hint(state: &DashboardState, sidebar_visible: bool) -> &'static str {
     }
 
     if sidebar_visible {
-        return "Use 1-4 or Up/Down (j/k) for pages | Ctrl+B hide sidebar | Esc exit";
+        return "Use Up/Down (j/k) to choose | Enter open page/session | Ctrl+B hide sidebar | Esc exit";
     }
 
     match state.active_page {
@@ -881,6 +1406,9 @@ fn keybind_hint(state: &DashboardState, sidebar_visible: bool) -> &'static str {
             "j/k or Up/Down scroll | PageUp/PageDown jump | Ctrl+B toggle sidebar | Esc exit"
         }
         DashboardPage::Credits => "Ctrl+B toggle sidebar | Esc exit",
+        DashboardPage::Ssh => {
+            "SSH: type to send input | Esc disconnect active | Ctrl+B toggle sidebar"
+        }
     }
 }
 

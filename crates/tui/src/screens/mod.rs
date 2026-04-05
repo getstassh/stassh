@@ -15,7 +15,6 @@ mod dashboard;
 mod onboarding_wants_encryption;
 mod onboarding_wants_passphrase;
 mod onboarding_wants_telemetry;
-mod ssh_session;
 
 type AppEffect = Box<dyn FnOnce(&mut App)>;
 
@@ -121,7 +120,6 @@ static HANDLERS: &[&dyn AnyScreenHandler] = &[
     &onboarding_wants_passphrase::HANDLER,
     &onboarding_wants_telemetry::HANDLER,
     &asking_passphrase::HANDLER,
-    &ssh_session::HANDLER,
 ];
 
 static EMPTY_HANDLER: ScreenHandler<()> = ScreenHandler {

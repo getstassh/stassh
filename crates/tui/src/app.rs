@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 
 use backend::DbEncryption;
 
-use crate::navigation::{DashboardState, Screen, StringState, YesNoState};
+use crate::navigation::{DashboardPage, DashboardState, Screen, StringState, YesNoState};
 
 pub(crate) struct App {
     pub(crate) screen: Screen,
@@ -52,7 +52,7 @@ impl App {
     }
 
     pub(crate) fn is_ssh_screen(&self) -> bool {
-        matches!(self.screen, Screen::SshSession { .. })
+        matches!(&self.screen, Screen::Dashboard { state } if state.active_page == DashboardPage::Ssh)
     }
 
     pub(crate) fn has_modal_open(&self) -> bool {

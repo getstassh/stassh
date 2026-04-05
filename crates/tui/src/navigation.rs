@@ -8,7 +8,6 @@ pub(crate) enum Screen {
     OnboardingWantsTelemetry { state: YesNoState },
     AskingPassphrase { state: StringState },
     Dashboard { state: DashboardState },
-    SshSession { state: SshSessionState },
 }
 
 pub(crate) struct SshSessionState {
@@ -70,10 +69,12 @@ pub(crate) enum DashboardPage {
     Settings,
     Debug,
     Credits,
+    Ssh,
 }
 
 pub(crate) struct DashboardState {
     pub(crate) active_page: DashboardPage,
+    pub(crate) sidebar_cursor: usize,
     pub(crate) selected_host: usize,
     pub(crate) host_modal: Option<HostModalState>,
     pub(crate) last_status: Option<String>,
@@ -82,12 +83,17 @@ pub(crate) struct DashboardState {
     pub(crate) probe_tasks: Vec<HostProbeTask>,
     pub(crate) last_probe_at: Instant,
     pub(crate) needs_initial_probe: bool,
+    pub(crate) ssh_tabs: Vec<SshSessionState>,
+    pub(crate) active_ssh_tab: Option<usize>,
 }
 
 impl DashboardState {
+    pub(crate) const FIXED_SIDEBAR_ITEMS: usize = 4;
+
     pub(crate) fn new() -> Self {
         Self {
             active_page: DashboardPage::Home,
+            sidebar_cursor: 0,
             selected_host: 0,
             host_modal: None,
             last_status: None,
@@ -96,7 +102,13 @@ impl DashboardState {
             probe_tasks: Vec::new(),
             last_probe_at: Instant::now(),
             needs_initial_probe: true,
+            ssh_tabs: Vec::new(),
+            active_ssh_tab: None,
         }
+    }
+
+    pub(crate) fn sidebar_items_count(&self) -> usize {
+        Self::FIXED_SIDEBAR_ITEMS + self.ssh_tabs.len()
     }
 }
 
