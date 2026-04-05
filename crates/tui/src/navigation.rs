@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{collections::HashMap, thread::JoinHandle, time::Instant};
 
 use crate::ssh_client::{LiveSshSession, PendingSshStart, TrustChallenge};
 
@@ -72,13 +72,16 @@ pub(crate) enum DashboardPage {
     Credits,
 }
 
-#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DashboardState {
     pub(crate) active_page: DashboardPage,
     pub(crate) selected_host: usize,
     pub(crate) host_modal: Option<HostModalState>,
     pub(crate) last_status: Option<String>,
     pub(crate) debug_scroll: u16,
+    pub(crate) host_statuses: HashMap<u32, HostConnectionStatus>,
+    pub(crate) probe_tasks: Vec<HostProbeTask>,
+    pub(crate) last_probe_at: Instant,
+    pub(crate) needs_initial_probe: bool,
 }
 
 impl DashboardState {
@@ -89,8 +92,25 @@ impl DashboardState {
             host_modal: None,
             last_status: None,
             debug_scroll: 0,
+            host_statuses: HashMap::new(),
+            probe_tasks: Vec::new(),
+            last_probe_at: Instant::now(),
+            needs_initial_probe: true,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostConnectionStatus {
+    Unknown,
+    Checking,
+    Reachable,
+    Unreachable,
+}
+
+pub(crate) struct HostProbeTask {
+    pub(crate) host_id: u32,
+    pub(crate) join: JoinHandle<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

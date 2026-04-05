@@ -1,3 +1,9 @@
+use std::{
+    net::{TcpStream, ToSocketAddrs},
+    thread,
+    time::{Duration, Instant},
+};
+
 use backend::{AppState, HostAuth, SshHost};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -9,8 +15,8 @@ use ratatui::{
 
 use crate::{
     navigation::{
-        DashboardPage, DashboardState, HostAuthMode, HostFormField, HostFormState, HostModalMode,
-        HostModalState, Screen, SshSessionState,
+        DashboardPage, DashboardState, HostAuthMode, HostConnectionStatus, HostFormField,
+        HostFormState, HostModalMode, HostModalState, HostProbeTask, Screen, SshSessionState,
     },
     screens::{AppEffect, ScreenHandler},
     ui::full_rect,
@@ -18,6 +24,7 @@ use crate::{
 
 const HOME_GRID_COLUMNS: usize = 3;
 const HOST_CARD_HEIGHT: u16 = 6;
+const HOST_PROBE_INTERVAL: Duration = Duration::from_secs(20);
 
 pub(crate) static HANDLER: ScreenHandler<DashboardState> = ScreenHandler {
     matches: |s| matches!(s, Screen::Dashboard { .. }),
@@ -33,7 +40,7 @@ pub(crate) static HANDLER: ScreenHandler<DashboardState> = ScreenHandler {
     handle_key,
     handle_paste,
     handle_resize: |_, _, _, _| None,
-    handle_tick: |_app, _| None,
+    handle_tick,
 };
 
 fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
@@ -148,6 +155,86 @@ fn handle_paste(_app: &AppState, text: &str, state: &mut DashboardState) -> Opti
         insert_pasted_text(&mut modal.form, text);
     }
     None
+}
+
+fn handle_tick(app: &AppState, state: &mut DashboardState) -> Option<AppEffect> {
+    reap_probe_tasks(state);
+    sync_host_status_maps(app, state);
+
+    let should_probe =
+        state.needs_initial_probe || state.last_probe_at.elapsed() >= HOST_PROBE_INTERVAL;
+    if should_probe {
+        start_probe_round(app, state);
+        state.last_probe_at = Instant::now();
+        state.needs_initial_probe = false;
+    }
+
+    None
+}
+
+fn reap_probe_tasks(state: &mut DashboardState) {
+    let mut idx = 0;
+    while idx < state.probe_tasks.len() {
+        if !state.probe_tasks[idx].join.is_finished() {
+            idx += 1;
+            continue;
+        }
+
+        let task = state.probe_tasks.swap_remove(idx);
+        let reachable = task.join.join().unwrap_or(false);
+        let status = if reachable {
+            HostConnectionStatus::Reachable
+        } else {
+            HostConnectionStatus::Unreachable
+        };
+        state.host_statuses.insert(task.host_id, status);
+    }
+}
+
+fn sync_host_status_maps(app: &AppState, state: &mut DashboardState) {
+    let host_ids = app.db.hosts.iter().map(|h| h.id).collect::<Vec<_>>();
+    state.host_statuses.retain(|id, _| host_ids.contains(id));
+
+    for host in &app.db.hosts {
+        state
+            .host_statuses
+            .entry(host.id)
+            .or_insert(HostConnectionStatus::Unknown);
+    }
+}
+
+fn start_probe_round(app: &AppState, state: &mut DashboardState) {
+    let timeout = Duration::from_secs(app.config.ssh_connect_timeout_seconds.max(1));
+
+    for host in &app.db.hosts {
+        if state.probe_tasks.iter().any(|task| task.host_id == host.id) {
+            continue;
+        }
+
+        state
+            .host_statuses
+            .insert(host.id, HostConnectionStatus::Checking);
+        let host_id = host.id;
+        let host_name = host.host.clone();
+        let port = host.port;
+
+        let join = thread::spawn(move || host_is_reachable(&host_name, port, timeout));
+        state.probe_tasks.push(HostProbeTask { host_id, join });
+    }
+}
+
+fn host_is_reachable(host: &str, port: u16, timeout: Duration) -> bool {
+    let Ok(addrs) = (host, port).to_socket_addrs() else {
+        return false;
+    };
+
+    for addr in addrs {
+        if TcpStream::connect_timeout(&addr, timeout).is_ok() {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn handle_modal_key(
@@ -605,22 +692,37 @@ fn render_home(frame: &mut Frame, area: Rect, app: &AppState, state: &DashboardS
             let index = row_idx * columns + col_idx;
             if let Some(host) = app.db.hosts.get(index) {
                 let selected = index == state.selected_host;
-                render_host_card(frame, *col_area, host, selected);
+                let status = state
+                    .host_statuses
+                    .get(&host.id)
+                    .copied()
+                    .unwrap_or(HostConnectionStatus::Unknown);
+                render_host_card(frame, *col_area, host, selected, status);
             }
         }
     }
 }
 
-fn render_host_card(frame: &mut Frame, area: Rect, host: &SshHost, selected: bool) {
+fn render_host_card(
+    frame: &mut Frame,
+    area: Rect,
+    host: &SshHost,
+    selected: bool,
+    status: HostConnectionStatus,
+) {
     let border = if selected {
         Style::default().fg(Color::Yellow)
+    } else if status == HostConnectionStatus::Unreachable {
+        Style::default().fg(Color::Red)
     } else {
         Style::default().fg(Color::DarkGray)
     };
+
     let block = Block::default()
         .title(format!(" {} ", host.name))
         .borders(Borders::ALL)
-        .border_style(border);
+        .border_style(border)
+        .style(Style::default());
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -631,10 +733,23 @@ fn render_host_card(frame: &mut Frame, area: Rect, host: &SshHost, selected: boo
     };
 
     let content = Paragraph::new(format!(
-        "{}@{}:{}\nauth: {}\n[e] edit  [enter] connect",
-        host.user, host.host, host.port, auth_label
+        "{}@{}:{}\nauth: {}\nstatus: {}\n[e] edit  [enter] connect",
+        host.user,
+        host.host,
+        host.port,
+        auth_label,
+        host_status_label(status),
     ));
     frame.render_widget(content, inner);
+}
+
+fn host_status_label(status: HostConnectionStatus) -> &'static str {
+    match status {
+        HostConnectionStatus::Unknown => "unknown",
+        HostConnectionStatus::Checking => "checking",
+        HostConnectionStatus::Reachable => "reachable",
+        HostConnectionStatus::Unreachable => "unreachable",
+    }
 }
 
 fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) {
