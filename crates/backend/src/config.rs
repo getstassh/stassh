@@ -5,21 +5,28 @@ use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
-use crate::db::DbEncryption;
+use crate::{
+    db::DbEncryption,
+    migrations::{LATEST_CONFIG_VERSION, migrate_config_value},
+};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
+    pub version: &'static str,
     pub enable_telemetry: Option<bool>,
     pub db_encryption: Option<DbEncryption>,
     pub show_sidebar: bool,
+    pub ssh_idle_timeout_seconds: u64,
 }
 
 impl Config {
     pub(crate) fn default() -> Self {
         Self {
+            version: LATEST_CONFIG_VERSION,
             enable_telemetry: None,
             db_encryption: None,
             show_sidebar: true,
+            ssh_idle_timeout_seconds: 600,
         }
     }
 
@@ -59,14 +66,22 @@ fn load_config() -> Result<Config> {
     let path = config_path()?;
 
     if !path.exists() {
-        return Ok(Config::default());
+        let config = Config::default();
+        config.save_config()?;
+        return Ok(config);
     }
 
     let text = fs::read_to_string(&path)
         .with_context(|| format!("failed to read config file {}", path.display()))?;
 
-    let config = serde_json::from_str(&text)
+    let value: serde_json::Value = serde_json::from_str(&text)
         .with_context(|| format!("failed to parse config JSON from {}", path.display()))?;
+
+    let (config, changed) = migrate_config_value(value)?;
+
+    if changed {
+        config.save_config()?;
+    }
 
     Ok(config)
 }

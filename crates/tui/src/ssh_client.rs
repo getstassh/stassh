@@ -202,6 +202,7 @@ pub(crate) fn start_session_async(
     trusted_host_keys: &[TrustedHostKey],
     rows: u16,
     cols: u16,
+    inactivity_timeout_seconds: u64,
 ) -> PendingSshStart {
     let (input_tx, input_rx) = tokio_mpsc::unbounded_channel::<SessionInput>();
     let (event_tx, event_rx) = mpsc::channel::<SessionEvent>();
@@ -236,6 +237,7 @@ pub(crate) fn start_session_async(
                 trusted_host_keys,
                 rows,
                 cols,
+                inactivity_timeout_seconds,
                 input_rx,
                 event_for_connect,
                 shared_for_connect,
@@ -274,13 +276,17 @@ async fn connect_and_run(
     trusted_host_keys: Vec<TrustedHostKey>,
     rows: u16,
     cols: u16,
+    inactivity_timeout_seconds: u64,
     mut input_rx: tokio_mpsc::UnboundedReceiver<SessionInput>,
     event_tx: mpsc::Sender<SessionEvent>,
     shared: Arc<Mutex<SharedVerificationState>>,
     ready_tx: mpsc::Sender<SessionReady>,
 ) -> Result<()> {
+    let idle_timeout = Duration::from_secs(inactivity_timeout_seconds.max(1));
     let config = Arc::new(client::Config {
-        inactivity_timeout: Some(Duration::from_secs(20)),
+        inactivity_timeout: Some(idle_timeout),
+        keepalive_interval: Some(Duration::from_secs(15)),
+        keepalive_max: 3,
         ..Default::default()
     });
 
@@ -375,6 +381,12 @@ async fn connect_and_run(
             }
             maybe_msg = channel.wait() => {
                 let Some(msg) = maybe_msg else {
+                    let _ = event_tx.send(SessionEvent::Closed(
+                        format!(
+                            "SSH session timed out after {}s of inactivity",
+                            idle_timeout.as_secs()
+                        ),
+                    ));
                     break;
                 };
                 match msg {

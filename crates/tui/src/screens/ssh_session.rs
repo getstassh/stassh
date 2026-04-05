@@ -131,6 +131,7 @@ fn handle_tick(app: &AppState, state: &mut SshSessionState) -> Option<AppEffect>
                     &app.db.trusted_host_keys,
                     state.last_good_rows,
                     state.last_good_cols,
+                    app.config.ssh_idle_timeout_seconds,
                 ));
             }
 
@@ -171,9 +172,15 @@ fn handle_tick(app: &AppState, state: &mut SshSessionState) -> Option<AppEffect>
                 match event {
                     SessionEvent::OutputBytes(bytes) => parser.process(&bytes),
                     SessionEvent::Error(error) => {
-                        close_status = Some(format!("SSH error: {error}"))
+                        if close_status.is_none() {
+                            close_status = Some(format!("SSH error: {error}"));
+                        }
                     }
-                    SessionEvent::Closed(status) => close_status = Some(status),
+                    SessionEvent::Closed(status) => {
+                        if close_status.is_none() {
+                            close_status = Some(status);
+                        }
+                    }
                 }
             }
 
