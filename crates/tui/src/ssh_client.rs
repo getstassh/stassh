@@ -203,6 +203,7 @@ pub(crate) fn start_session_async(
     rows: u16,
     cols: u16,
     inactivity_timeout_seconds: u64,
+    connect_timeout_seconds: u64,
 ) -> PendingSshStart {
     let (input_tx, input_rx) = tokio_mpsc::unbounded_channel::<SessionInput>();
     let (event_tx, event_rx) = mpsc::channel::<SessionEvent>();
@@ -238,6 +239,7 @@ pub(crate) fn start_session_async(
                 rows,
                 cols,
                 inactivity_timeout_seconds,
+                connect_timeout_seconds,
                 input_rx,
                 event_for_connect,
                 shared_for_connect,
@@ -257,7 +259,7 @@ pub(crate) fn start_session_async(
                     let _ = ready_tx.send(SessionReady::TrustRequired(challenge));
                 } else {
                     let _ = event_tx.send(SessionEvent::Error(format!("{e}")));
-                    let _ = ready_tx.send(SessionReady::Error(format!("SSH error: {e}")));
+                    let _ = ready_tx.send(SessionReady::Error(format!("{e}")));
                 }
             }
         }
@@ -277,12 +279,14 @@ async fn connect_and_run(
     rows: u16,
     cols: u16,
     inactivity_timeout_seconds: u64,
+    connect_timeout_seconds: u64,
     mut input_rx: tokio_mpsc::UnboundedReceiver<SessionInput>,
     event_tx: mpsc::Sender<SessionEvent>,
     shared: Arc<Mutex<SharedVerificationState>>,
     ready_tx: mpsc::Sender<SessionReady>,
 ) -> Result<()> {
     let idle_timeout = Duration::from_secs(inactivity_timeout_seconds.max(1));
+    let connect_timeout = Duration::from_secs(connect_timeout_seconds.max(1));
     let config = Arc::new(client::Config {
         inactivity_timeout: Some(idle_timeout),
         keepalive_interval: Some(Duration::from_secs(15)),
@@ -298,9 +302,13 @@ async fn connect_and_run(
     };
 
     let addr = (host.host.as_str(), host.port);
-    let mut session = client::connect(config, addr, handler)
-        .await
-        .context("failed to establish SSH connection")?;
+    let mut session =
+        match tokio::time::timeout(connect_timeout, client::connect(config, addr, handler)).await {
+            Ok(result) => result.context("failed to establish SSH connection")?,
+            Err(_) => {
+                bail!("SSH connect timed out after {}s", connect_timeout.as_secs());
+            }
+        };
 
     match &host.auth {
         HostAuth::Key { key_path } => {

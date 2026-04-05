@@ -51,7 +51,6 @@ pub(crate) enum SshSessionPhase {
     Running {
         live: LiveSshSession,
     },
-    Error(String),
 }
 
 impl SshSessionPhase {

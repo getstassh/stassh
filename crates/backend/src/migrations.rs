@@ -92,7 +92,7 @@ pub(crate) fn migrate_db_value(value: Value) -> Result<(Database, bool)> {
     Ok((db.into_latest(), changed))
 }
 
-pub(crate) const LATEST_CONFIG_VERSION: &str = "1";
+pub(crate) const LATEST_CONFIG_VERSION: &str = "2";
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "version")]
 enum ConfigAny {
@@ -110,6 +110,15 @@ enum ConfigAny {
         show_sidebar: bool,
         ssh_idle_timeout_seconds: u64,
     },
+
+    #[serde(rename = "2")]
+    V2 {
+        enable_telemetry: Option<bool>,
+        db_encryption: Option<DbEncryption>,
+        show_sidebar: bool,
+        ssh_idle_timeout_seconds: u64,
+        ssh_connect_timeout_seconds: u64,
+    },
 }
 
 impl ConfigAny {
@@ -125,23 +134,37 @@ impl ConfigAny {
                 show_sidebar: show_sidebar.unwrap_or(true),
                 ssh_idle_timeout_seconds: 600,
             }),
-            Self::V1 { .. } => None,
-        }
-    }
-
-    fn into_latest(self) -> Config {
-        match self {
             Self::V1 {
                 enable_telemetry,
                 db_encryption,
                 show_sidebar,
                 ssh_idle_timeout_seconds,
+            } => Some(Self::V2 {
+                enable_telemetry: *enable_telemetry,
+                db_encryption: db_encryption.clone(),
+                show_sidebar: *show_sidebar,
+                ssh_idle_timeout_seconds: *ssh_idle_timeout_seconds,
+                ssh_connect_timeout_seconds: 5,
+            }),
+            Self::V2 { .. } => None,
+        }
+    }
+
+    fn into_latest(self) -> Config {
+        match self {
+            Self::V2 {
+                enable_telemetry,
+                db_encryption,
+                show_sidebar,
+                ssh_idle_timeout_seconds,
+                ssh_connect_timeout_seconds,
             } => Config {
                 version: LATEST_CONFIG_VERSION,
                 enable_telemetry,
                 db_encryption,
                 show_sidebar,
                 ssh_idle_timeout_seconds: ssh_idle_timeout_seconds.max(1),
+                ssh_connect_timeout_seconds: ssh_connect_timeout_seconds.max(1),
             },
             _ => unreachable!("config was not fully migrated"),
         }

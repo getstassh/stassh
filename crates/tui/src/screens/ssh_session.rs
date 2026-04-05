@@ -71,12 +71,6 @@ fn handle_key(_: &AppState, key: KeyEvent, state: &mut SshSessionState) -> Optio
             live.send_input(SessionInput::Data(bytes));
             None
         }
-        SshSessionPhase::Error(_) => {
-            if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
-                return Some(back_to_dashboard("SSH session closed".to_string()));
-            }
-            None
-        }
     }
 }
 
@@ -132,6 +126,7 @@ fn handle_tick(app: &AppState, state: &mut SshSessionState) -> Option<AppEffect>
                     state.last_good_rows,
                     state.last_good_cols,
                     app.config.ssh_idle_timeout_seconds,
+                    app.config.ssh_connect_timeout_seconds,
                 ));
             }
 
@@ -154,12 +149,11 @@ fn handle_tick(app: &AppState, state: &mut SshSessionState) -> Option<AppEffect>
                     });
                 }
                 StartSessionResult::Error(error) => {
-                    next_phase = Some(SshSessionPhase::Error(error));
+                    return Some(back_to_dashboard(error));
                 }
             }
         }
         SshSessionPhase::TrustPrompt { .. } => {}
-        SshSessionPhase::Error(_) => {}
         SshSessionPhase::Running { live } => {
             let parser = &mut state.parser;
             let mut events = Vec::new();
@@ -173,7 +167,7 @@ fn handle_tick(app: &AppState, state: &mut SshSessionState) -> Option<AppEffect>
                     SessionEvent::OutputBytes(bytes) => parser.process(&bytes),
                     SessionEvent::Error(error) => {
                         if close_status.is_none() {
-                            close_status = Some(format!("SSH error: {error}"));
+                            close_status = Some(error);
                         }
                     }
                     SessionEvent::Closed(status) => {
@@ -220,7 +214,6 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &SshSessionState) {
         SshSessionPhase::Starting { .. } => "Connecting... Esc cancel",
         SshSessionPhase::TrustPrompt { .. } => "Y/Enter trust, N/Esc cancel",
         SshSessionPhase::Running { .. } => "Esc disconnect",
-        SshSessionPhase::Error(_) => "Esc/Enter return to dashboard",
     };
     let title = format!("SSH Session - {}", state.title);
     let (inner, area) = full_rect(a, &title, help);
@@ -261,12 +254,6 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &SshSessionState) {
         SshSessionPhase::Running { .. } => {
             frame.render_widget(
                 Paragraph::new(render_vt100_text(&state.parser)).alignment(Alignment::Left),
-                area,
-            );
-        }
-        SshSessionPhase::Error(error) => {
-            frame.render_widget(
-                Paragraph::new(error.clone()).alignment(Alignment::Center),
                 area,
             );
         }

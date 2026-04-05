@@ -17,6 +17,7 @@ pub struct Config {
     pub db_encryption: Option<DbEncryption>,
     pub show_sidebar: bool,
     pub ssh_idle_timeout_seconds: u64,
+    pub ssh_connect_timeout_seconds: u64,
 }
 
 impl Config {
@@ -27,6 +28,7 @@ impl Config {
             db_encryption: None,
             show_sidebar: true,
             ssh_idle_timeout_seconds: 600,
+            ssh_connect_timeout_seconds: 5,
         }
     }
 
