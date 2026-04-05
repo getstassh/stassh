@@ -729,20 +729,20 @@ fn modal_line(label: &str, value: &str, selected: bool) -> String {
 
 fn keybind_hint(state: &DashboardState, sidebar_visible: bool) -> &'static str {
     if state.host_modal.is_some() {
-        return "HOST form: Tab/Shift+Tab move field, Ctrl+S save, Esc cancel";
+        return "HOST form: Tab/Shift+Tab move field, Ctrl+S save, Esc cancel/exit";
     }
 
     if sidebar_visible {
-        return "Use 1-4 or Up/Down (j/k) for pages, Ctrl+B to hide sidebar";
+        return "Use 1-4 or Up/Down (j/k) for pages, Ctrl+B to hide sidebar, Esc exit";
     }
 
     match state.active_page {
         DashboardPage::Home => {
-            "HOME: arrows or hjkl move, A add, E edit, Enter/C connect, Ctrl+B toggle sidebar"
+            "HOME: arrows or hjkl move, A add, E edit, Enter/C connect, Ctrl+B toggle sidebar, Esc exit"
         }
-        DashboardPage::Settings => "Ctrl+B toggle sidebar",
-        DashboardPage::Debug => "Ctrl+B toggle sidebar",
-        DashboardPage::Credits => "Ctrl+B toggle sidebar",
+        DashboardPage::Settings => "Ctrl+B toggle sidebar, Esc exit",
+        DashboardPage::Debug => "Ctrl+B toggle sidebar, Esc exit",
+        DashboardPage::Credits => "Ctrl+B toggle sidebar, Esc exit",
     }
 }
 

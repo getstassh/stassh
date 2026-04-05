@@ -74,11 +74,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
             match event::read()? {
                 Event::Key(key) => {
                     if key.kind == KeyEventKind::Press {
-                        if key.code == KeyCode::Char('c')
-                            && key
-                                .modifiers
-                                .contains(crossterm::event::KeyModifiers::CONTROL)
-                            && !app.is_ssh_screen()
+                        if key.code == KeyCode::Esc && !app.is_ssh_screen() && !app.has_modal_open()
                         {
                             return Ok(());
                         }

@@ -54,6 +54,10 @@ impl App {
     pub(crate) fn is_ssh_screen(&self) -> bool {
         matches!(self.screen, Screen::SshSession { .. })
     }
+
+    pub(crate) fn has_modal_open(&self) -> bool {
+        matches!(&self.screen, Screen::Dashboard { state } if state.host_modal.is_some())
+    }
 }
 
 impl Deref for App {

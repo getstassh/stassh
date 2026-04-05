@@ -219,7 +219,7 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &SshSessionState) {
     let help = match &state.phase {
         SshSessionPhase::Starting { .. } => "Connecting... Esc cancel",
         SshSessionPhase::TrustPrompt { .. } => "Y/Enter trust, N/Esc cancel",
-        SshSessionPhase::Running { .. } => "Esc disconnect | Ctrl+C sends SIGINT to remote",
+        SshSessionPhase::Running { .. } => "Esc disconnect",
         SshSessionPhase::Error(_) => "Esc/Enter return to dashboard",
     };
     let title = format!("SSH Session - {}", state.title);

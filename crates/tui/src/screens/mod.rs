@@ -131,7 +131,7 @@ static EMPTY_HANDLER: ScreenHandler<()> = ScreenHandler {
     render: |frame, _, _| {
         let a = frame.area();
 
-        let (inner, area) = full_rect(a, "404 not found", "CTRL+C to exit");
+        let (inner, area) = full_rect(a, "404 not found", "Esc to exit");
 
         frame.render_widget(inner, a);
 
