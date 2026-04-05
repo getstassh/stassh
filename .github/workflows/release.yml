@@ -43,9 +43,19 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Validate telemetry secret
+        env:
+          STASSH_TELEMETRY_SECRET: ${{ secrets.STASSH_TELEMETRY_SECRET }}
+        run: |
+          if [ -z "$STASSH_TELEMETRY_SECRET" ]; then
+            echo "Missing required secret: STASSH_TELEMETRY_SECRET"
+            exit 1
+          fi
+
       - name: Build release binary
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
+          STASSH_TELEMETRY_SECRET: ${{ secrets.STASSH_TELEMETRY_SECRET }}
         run: cargo build --locked --release -p stassh --target ${{ matrix.target }}
 
       - name: Package archive

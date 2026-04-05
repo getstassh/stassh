@@ -21,6 +21,7 @@ mod inputs;
 mod navigation;
 mod screens;
 mod ssh_client;
+mod telemetry;
 mod ui;
 
 fn main() -> Result<()> {
@@ -67,6 +68,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
         let time_since_last_tick = last_tick_time.elapsed();
         if time_since_last_tick >= tick_rate {
             handler.handle_tick(app);
+            app.maybe_report_telemetry();
             last_tick_time = std::time::Instant::now();
         }
 

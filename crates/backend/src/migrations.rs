@@ -92,7 +92,7 @@ pub(crate) fn migrate_db_value(value: Value) -> Result<(Database, bool)> {
     Ok((db.into_latest(), changed))
 }
 
-pub(crate) const LATEST_CONFIG_VERSION: &str = "4";
+pub(crate) const LATEST_CONFIG_VERSION: &str = "6";
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "version")]
 enum ConfigAny {
@@ -131,6 +131,27 @@ enum ConfigAny {
     #[serde(rename = "4")]
     V4 {
         enable_telemetry: Option<bool>,
+        db_encryption: Option<DbEncryption>,
+        show_debug_panel: bool,
+        ssh_idle_timeout_seconds: u64,
+        ssh_connect_timeout_seconds: u64,
+    },
+
+    #[serde(rename = "5")]
+    V5 {
+        enable_telemetry: Option<bool>,
+        telemetry_uuid: Option<String>,
+        db_encryption: Option<DbEncryption>,
+        show_debug_panel: bool,
+        ssh_idle_timeout_seconds: u64,
+        ssh_connect_timeout_seconds: u64,
+    },
+
+    #[serde(rename = "6")]
+    V6 {
+        enable_telemetry: Option<bool>,
+        telemetry_uuid: Option<String>,
+        last_telemetry_report_at_unix_ms: Option<u64>,
         db_encryption: Option<DbEncryption>,
         show_debug_panel: bool,
         ssh_idle_timeout_seconds: u64,
@@ -187,14 +208,46 @@ impl ConfigAny {
                 ssh_idle_timeout_seconds: *ssh_idle_timeout_seconds,
                 ssh_connect_timeout_seconds: *ssh_connect_timeout_seconds,
             }),
-            Self::V4 { .. } => None,
+            Self::V4 {
+                enable_telemetry,
+                db_encryption,
+                show_debug_panel,
+                ssh_idle_timeout_seconds,
+                ssh_connect_timeout_seconds,
+            } => Some(Self::V5 {
+                enable_telemetry: *enable_telemetry,
+                telemetry_uuid: None,
+                db_encryption: db_encryption.clone(),
+                show_debug_panel: *show_debug_panel,
+                ssh_idle_timeout_seconds: *ssh_idle_timeout_seconds,
+                ssh_connect_timeout_seconds: *ssh_connect_timeout_seconds,
+            }),
+            Self::V5 {
+                enable_telemetry,
+                telemetry_uuid,
+                db_encryption,
+                show_debug_panel,
+                ssh_idle_timeout_seconds,
+                ssh_connect_timeout_seconds,
+            } => Some(Self::V6 {
+                enable_telemetry: *enable_telemetry,
+                telemetry_uuid: telemetry_uuid.clone(),
+                last_telemetry_report_at_unix_ms: None,
+                db_encryption: db_encryption.clone(),
+                show_debug_panel: *show_debug_panel,
+                ssh_idle_timeout_seconds: *ssh_idle_timeout_seconds,
+                ssh_connect_timeout_seconds: *ssh_connect_timeout_seconds,
+            }),
+            Self::V6 { .. } => None,
         }
     }
 
     fn into_latest(self) -> Config {
         match self {
-            Self::V4 {
+            Self::V6 {
                 enable_telemetry,
+                telemetry_uuid,
+                last_telemetry_report_at_unix_ms,
                 db_encryption,
                 show_debug_panel,
                 ssh_idle_timeout_seconds,
@@ -202,6 +255,8 @@ impl ConfigAny {
             } => Config {
                 version: LATEST_CONFIG_VERSION,
                 enable_telemetry,
+                telemetry_uuid,
+                last_telemetry_report_at_unix_ms,
                 db_encryption,
                 show_debug_panel,
                 ssh_idle_timeout_seconds: ssh_idle_timeout_seconds.max(1),
