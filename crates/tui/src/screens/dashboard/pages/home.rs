@@ -175,7 +175,6 @@ fn render_host_card(
 fn host_status_label(status: HostConnectionStatus) -> &'static str {
     match status {
         HostConnectionStatus::Unknown => "unknown",
-        HostConnectionStatus::Checking => "checking",
         HostConnectionStatus::Reachable => "reachable",
         HostConnectionStatus::Unreachable => "unreachable",
     }

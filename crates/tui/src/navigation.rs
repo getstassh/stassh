@@ -124,7 +124,6 @@ impl QuickSwitcherState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HostConnectionStatus {
     Unknown,
-    Checking,
     Reachable,
     Unreachable,
 }

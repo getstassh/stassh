@@ -150,9 +150,6 @@ fn start_probe_round(app: &AppState, state: &mut DashboardState) {
             continue;
         }
 
-        state
-            .host_statuses
-            .insert(host.id, HostConnectionStatus::Checking);
         let host_id = host.id;
         let host_name = host.host.clone();
         let port = host.port;
