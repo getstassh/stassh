@@ -56,7 +56,7 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &StringState) {
     let (inner, area) = full_rect(
         a,
         "Welcome to stassh!",
-        "Use ←/→ or Tab to switch, Enter to confirm, type your passphrase",
+        "←/→ or Tab switch | Enter confirm | Type passphrase",
     );
 
     frame.render_widget(inner, a);

@@ -70,11 +70,7 @@ fn handle_paste(_: &AppState, text: &str, state: &mut StringState) -> Option<App
 fn ui(frame: &mut Frame, _app: &AppState, state: &StringState) {
     let a = frame.area();
 
-    let (inner, area) = full_rect(
-        a,
-        "Enter Passphrase",
-        "Type your passphrase and press Enter",
-    );
+    let (inner, area) = full_rect(a, "Enter Passphrase", "Type passphrase | Enter confirm");
 
     frame.render_widget(inner, a);
 
