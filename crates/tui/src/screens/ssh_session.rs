@@ -452,6 +452,7 @@ fn key_to_bytes(key: KeyEvent) -> Option<Vec<u8>> {
     match key.code {
         KeyCode::Enter => Some(vec![b'\r']),
         KeyCode::Tab => Some(vec![b'\t']),
+        KeyCode::Backspace if key.modifiers.contains(KeyModifiers::CONTROL) => Some(vec![0x17]),
         KeyCode::Backspace => Some(vec![0x7f]),
         KeyCode::Char(c) => Some(c.to_string().into_bytes()),
         KeyCode::Up => Some(b"\x1b[A".to_vec()),

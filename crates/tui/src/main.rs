@@ -5,8 +5,8 @@ use anyhow::Result;
 
 use crossterm::{
     event::{
-        self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
-        Event, KeyCode, KeyEventKind,
+        self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+        EnableFocusChange, EnableMouseCapture, Event, KeyCode, KeyEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -30,6 +30,7 @@ fn main() -> Result<()> {
         stdout,
         EnterAlternateScreen,
         EnableBracketedPaste,
+        EnableMouseCapture,
         EnableFocusChange
     )?;
     let backend = CrosstermBackend::new(stdout);
@@ -42,6 +43,7 @@ fn main() -> Result<()> {
     execute!(
         terminal.backend_mut(),
         DisableBracketedPaste,
+        DisableMouseCapture,
         DisableFocusChange,
         LeaveAlternateScreen
     )?;
@@ -92,6 +94,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                         handler.handle_resize(app, cols, rows);
                     }
                 }
+                Event::Mouse(_) => {}
                 Event::FocusGained => {
                     if let Ok((cols, rows)) = crossterm::terminal::size() {
                         if cols > 0 && rows > 0 {
