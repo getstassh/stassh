@@ -2807,6 +2807,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "stassh"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "backend",
+ "base64",
+ "crossterm",
+ "ratatui",
+ "russh",
+ "tokio",
+ "vt100",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3045,20 +3059,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
  "winnow",
-]
-
-[[package]]
-name = "tui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "backend",
- "base64",
- "crossterm",
- "ratatui",
- "russh",
- "tokio",
- "vt100",
 ]
 
 [[package]]

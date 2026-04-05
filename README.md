@@ -54,10 +54,34 @@ Decide when to trust a host and when to reject it, giving you explicit control o
 - Rust workspace (`crates/backend`, `crates/tui`)
 - `tokio`, `vt100`, `russh`, `ratatui`, `crossterm`
 
-## Run
+## Install
+
+### GitHub Releases
+
+Download the archive for your platform from [GitHub Releases](https://github.com/getstassh/stassh/releases), extract it, and place `stassh` somewhere on your `PATH`.
+
+### Install Script
 
 ```bash
-cargo run -p tui
+curl -fsSL https://raw.githubusercontent.com/getstassh/stassh/main/install.sh | sh
+```
+
+Install a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/getstassh/stassh/main/install.sh | sh -s -- --version v0.1.0
+```
+
+### Cargo
+
+```bash
+cargo install --git https://github.com/getstassh/stassh stassh --locked
+```
+
+## Run From Source
+
+```bash
+cargo run -p stassh
 ```
 
 On first launch, Stassh walks you through encryption and telemetry preferences.
