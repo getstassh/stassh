@@ -26,22 +26,10 @@ jobs:
           if [ "${old_commit}" = "0000000000000000000000000000000000000000" ]; then
             old_version=""
           else
-            old_version=$(git show "${old_commit}:crates/tui/Cargo.toml" | python - <<'PY'
-            import sys
-            import tomllib
-
-            print(tomllib.loads(sys.stdin.read())['package']['version'])
-            PY
-            )
+            old_version="$({ git show "${old_commit}:crates/tui/Cargo.toml"; } | python -c "import sys,tomllib; print(tomllib.loads(sys.stdin.read())['package']['version'])")"
           fi
 
-          new_version=$(python - <<'PY'
-          import tomllib
-
-          with open('crates/tui/Cargo.toml', 'rb') as f:
-              print(tomllib.load(f)['package']['version'])
-          PY
-          )
+          new_version="$(python -c "import tomllib; print(tomllib.load(open('crates/tui/Cargo.toml','rb'))['package']['version'])")"
 
           echo "old=${old_version}" >> "$GITHUB_OUTPUT"
           echo "new=${new_version}" >> "$GITHUB_OUTPUT"
