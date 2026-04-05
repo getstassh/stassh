@@ -1,5 +1,3 @@
-# Stassh
-
 <p align="center">
   <img src="/logo.svg" alt="Stassh logo" width="160" />
 </p>

@@ -166,7 +166,7 @@ dependencies = [
 
 [[package]]
 name = "backend"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aes-gcm 0.10.3",
  "anyhow",
@@ -174,7 +174,7 @@ dependencies = [
  "base64",
  "directories",
  "num_enum",
- "rand 0.8.5",
+ "rand 0.10.0",
  "serde",
  "serde_json",
 ]
@@ -3052,7 +3052,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stassh"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "backend",
