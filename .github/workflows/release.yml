@@ -10,6 +10,8 @@ permissions:
 
 env:
   BINARY_NAME: stassh
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
   build:
@@ -42,6 +44,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+          cache-targets: true
+
+      - name: Pre-fetch Cargo dependencies
+        run: cargo fetch --locked
 
       - name: Validate telemetry secret
         env:
