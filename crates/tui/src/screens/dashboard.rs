@@ -4,7 +4,7 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
 use crate::{
@@ -74,6 +74,27 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
     }
 
     if state.active_page != DashboardPage::Home {
+        if state.active_page == DashboardPage::Debug {
+            match key.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    state.debug_scroll = state.debug_scroll.saturating_sub(1);
+                    return None;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    state.debug_scroll = state.debug_scroll.saturating_add(1);
+                    return None;
+                }
+                KeyCode::PageUp => {
+                    state.debug_scroll = state.debug_scroll.saturating_sub(8);
+                    return None;
+                }
+                KeyCode::PageDown => {
+                    state.debug_scroll = state.debug_scroll.saturating_add(8);
+                    return None;
+                }
+                _ => {}
+            }
+        }
         return None;
     }
 
@@ -461,7 +482,7 @@ fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
     match state.active_page {
         DashboardPage::Home => render_home(frame, content_area, app, state),
         DashboardPage::Settings => frame.render_widget(render_settings(app), content_area),
-        DashboardPage::Debug => frame.render_widget(render_debug(app), content_area),
+        DashboardPage::Debug => render_debug(frame, content_area, app, state),
         DashboardPage::Credits => frame.render_widget(render_credits(), content_area),
     }
 
@@ -741,7 +762,9 @@ fn keybind_hint(state: &DashboardState, sidebar_visible: bool) -> &'static str {
             "HOME: arrows or hjkl move | A add | E edit | Enter/C connect | Ctrl+B toggle sidebar | Esc exit"
         }
         DashboardPage::Settings => "Ctrl+B toggle sidebar | Esc exit",
-        DashboardPage::Debug => "Ctrl+B toggle sidebar | Esc exit",
+        DashboardPage::Debug => {
+            "j/k or Up/Down scroll | PageUp/PageDown jump | Ctrl+B toggle sidebar | Esc exit"
+        }
         DashboardPage::Credits => "Ctrl+B toggle sidebar | Esc exit",
     }
 }
@@ -754,12 +777,24 @@ fn render_settings(app: &AppState) -> Paragraph<'static> {
     .alignment(Alignment::Left)
 }
 
-fn render_debug(app: &AppState) -> Paragraph<'static> {
-    Paragraph::new(format!(
+fn render_debug(frame: &mut Frame, area: Rect, app: &AppState, state: &DashboardState) {
+    let debug_text = format!(
         "Debug\n\nConfig object:\n{:#?}\n\nDB object:\n{:#?}",
         app.config, app.db,
-    ))
-    .alignment(Alignment::Left)
+    );
+    let text = Paragraph::new(debug_text.clone())
+        .alignment(Alignment::Left)
+        .scroll((state.debug_scroll, 0));
+
+    let viewport = area.height.saturating_sub(1) as u16;
+    let content_lines = debug_text.lines().count() as u16;
+    let max_scroll = content_lines.saturating_sub(viewport);
+    let scroll = state.debug_scroll.min(max_scroll);
+    let scrollbar = Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight);
+    let mut scrollbar_state = ScrollbarState::new(max_scroll as usize).position(scroll as usize);
+
+    frame.render_widget(text.scroll((scroll, 0)), area);
+    frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
 }
 
 fn render_credits() -> Paragraph<'static> {

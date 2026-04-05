@@ -78,6 +78,7 @@ pub(crate) struct DashboardState {
     pub(crate) selected_host: usize,
     pub(crate) host_modal: Option<HostModalState>,
     pub(crate) last_status: Option<String>,
+    pub(crate) debug_scroll: u16,
 }
 
 impl DashboardState {
@@ -87,6 +88,7 @@ impl DashboardState {
             selected_host: 0,
             host_modal: None,
             last_status: None,
+            debug_scroll: 0,
         }
     }
 }
