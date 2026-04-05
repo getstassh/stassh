@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "crates/tui/Cargo.toml"
+  workflow_dispatch:
 
 permissions:
   contents: write
