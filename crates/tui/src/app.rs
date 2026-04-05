@@ -5,7 +5,7 @@ use std::{
 };
 
 use backend::{
-    DbEncryption, ReleaseAsset, VersionCheckStatus, check_for_updates, start_update_install,
+    DbEncryption, UpdateCheckStatus, VersionCheckStatus, check_for_update, start_update_install,
 };
 use uuid::Uuid;
 
@@ -19,7 +19,7 @@ const TELEMETRY_REPORT_INTERVAL_MS: u64 = 6 * 60 * 60 * 1000;
 pub(crate) struct App {
     pub(crate) screen: Screen,
     backend: backend::AppState,
-    update_receiver: Option<mpsc::Receiver<VersionCheckStatus>>,
+    update_receiver: Option<mpsc::Receiver<UpdateCheckStatus>>,
     boot_completed: bool,
 }
 
@@ -66,9 +66,9 @@ impl App {
         let (tx, rx) = mpsc::channel();
 
         std::thread::spawn(move || {
-            let status = match check_for_updates(&version) {
+            let status = match check_for_update(&version) {
                 Ok(status) => status,
-                Err(err) => VersionCheckStatus::Error(err.to_string()),
+                Err(err) => UpdateCheckStatus::Error(err.to_string()),
             };
             let _ = tx.send(status);
         });
@@ -78,18 +78,10 @@ impl App {
 
     pub(crate) fn start_update_install(&mut self) {
         if let Screen::StartupUpdatePrompt { state } = &mut self.screen {
-            if let (Some(url), Some(latest)) =
-                (state.release_url.clone(), state.latest_version.clone())
-            {
+            if let Some(asset) = state.asset.clone() {
                 state.phase = crate::navigation::StartupUpdatePhase::Downloading;
-                state.install_receiver = Some(start_update_install(ReleaseAsset {
-                    name: format!(
-                        "stassh-v{}-{}.tar.gz",
-                        latest,
-                        option_env!("STASSH_BUILD_TARGET").unwrap_or("unknown")
-                    ),
-                    browser_download_url: url,
-                }));
+                state.install_receiver =
+                    Some(start_update_install(asset, state.checksum_asset.clone()));
             }
         }
     }
@@ -177,27 +169,44 @@ impl App {
         if let Some(rx) = &self.update_receiver {
             match rx.try_recv() {
                 Ok(status) => {
-                    self.version_status = status;
+                    self.version_status = match &status {
+                        UpdateCheckStatus::NoUpdate { current } => VersionCheckStatus::UpToDate {
+                            current: current.clone(),
+                        },
+                        UpdateCheckStatus::UpdateAvailable {
+                            current,
+                            latest,
+                            release_url,
+                            ..
+                        } => VersionCheckStatus::UpdateAvailable {
+                            current: current.clone(),
+                            latest: latest.clone(),
+                            url: release_url.clone(),
+                        },
+                        UpdateCheckStatus::Error(err) => VersionCheckStatus::Error(err.clone()),
+                    };
                     self.update_receiver = None;
                     if matches!(self.screen, Screen::StartupUpdateCheck { .. }) {
-                        self.screen = match &self.version_status {
-                            VersionCheckStatus::UpdateAvailable {
+                        self.screen = match status {
+                            UpdateCheckStatus::UpdateAvailable {
                                 current,
                                 latest,
-                                url,
+                                release_url,
+                                asset,
+                                checksum_asset,
                             } => Screen::StartupUpdatePrompt {
                                 state: StartupUpdateState {
                                     phase: crate::navigation::StartupUpdatePhase::Prompt,
                                     current_version: current.to_string(),
                                     latest_version: Some(latest.to_string()),
-                                    release_url: Some(url.clone()),
+                                    release_url: Some(release_url),
+                                    asset: Some(asset),
+                                    checksum_asset,
                                     message: None,
                                     spinner_frame: 0,
                                     downloaded: 0,
                                     total: None,
                                     install_receiver: None,
-                                    install_started: false,
-                                    skip_for_launch: false,
                                 },
                             },
                             _ => {

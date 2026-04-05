@@ -107,13 +107,13 @@ pub(crate) struct StartupUpdateState {
     pub(crate) current_version: String,
     pub(crate) latest_version: Option<String>,
     pub(crate) release_url: Option<String>,
+    pub(crate) asset: Option<backend::ReleaseAsset>,
+    pub(crate) checksum_asset: Option<backend::ReleaseAsset>,
     pub(crate) message: Option<String>,
     pub(crate) spinner_frame: usize,
     pub(crate) downloaded: u64,
     pub(crate) total: Option<u64>,
     pub(crate) install_receiver: Option<std::sync::mpsc::Receiver<backend::UpdateInstallStatus>>,
-    pub(crate) install_started: bool,
-    pub(crate) skip_for_launch: bool,
 }
 
 impl StartupUpdateState {
@@ -123,13 +123,13 @@ impl StartupUpdateState {
             current_version,
             latest_version: None,
             release_url: None,
+            asset: None,
+            checksum_asset: None,
             message: None,
             spinner_frame: 0,
             downloaded: 0,
             total: None,
             install_receiver: None,
-            install_started: false,
-            skip_for_launch: false,
         }
     }
 }

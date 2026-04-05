@@ -73,7 +73,6 @@ fn handle_tick(_: &backend::AppState, state: &mut StartupUpdateState) -> Option<
                     state.phase = StartupUpdatePhase::Failed;
                     state.message = Some(err);
                 }
-                UpdateInstallStatus::Idle => {}
             }
         }
     }

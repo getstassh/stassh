@@ -16,7 +16,6 @@ const RELEASES_URL: &str = "https://api.github.com/repos/getstassh/stassh/releas
 
 #[derive(Debug, Clone)]
 pub enum UpdateInstallStatus {
-    Idle,
     Downloading { downloaded: u64, total: Option<u64> },
     Verifying,
     Installing,
@@ -26,15 +25,15 @@ pub enum UpdateInstallStatus {
 
 #[derive(Debug, Clone)]
 pub enum UpdateCheckStatus {
-    Idle,
-    Checking,
     NoUpdate {
         current: Version,
     },
     UpdateAvailable {
         current: Version,
         latest: Version,
+        release_url: String,
         asset: ReleaseAsset,
+        checksum_asset: Option<ReleaseAsset>,
     },
     Error(String),
 }
@@ -65,41 +64,48 @@ pub fn check_for_updates(current_version: &str) -> Result<UpdateCheckStatus> {
         return Ok(UpdateCheckStatus::NoUpdate { current });
     }
 
-    let asset = select_asset(&release.assets)?;
+    let asset = select_archive_asset(&release.assets)?;
+    let checksum_asset = select_checksum_asset(&release.assets);
+
     Ok(UpdateCheckStatus::UpdateAvailable {
         current,
         latest,
+        release_url: release.html_url,
         asset,
+        checksum_asset,
     })
 }
 
-pub fn start_update_install(asset: ReleaseAsset) -> mpsc::Receiver<UpdateInstallStatus> {
+pub fn start_update_install(
+    asset: ReleaseAsset,
+    checksum_asset: Option<ReleaseAsset>,
+) -> mpsc::Receiver<UpdateInstallStatus> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        if let Err(err) = install_update(asset, tx.clone()) {
+        if let Err(err) = install_update(asset, checksum_asset, tx.clone()) {
             let _ = tx.send(UpdateInstallStatus::Failed(err.to_string()));
         }
     });
     rx
 }
 
-fn install_update(asset: ReleaseAsset, tx: mpsc::Sender<UpdateInstallStatus>) -> Result<()> {
+fn install_update(
+    asset: ReleaseAsset,
+    checksum_asset: Option<ReleaseAsset>,
+    tx: mpsc::Sender<UpdateInstallStatus>,
+) -> Result<()> {
     let temp_dir = std::env::temp_dir().join("stassh-update");
     fs::create_dir_all(&temp_dir)?;
 
     let archive_path = temp_dir.join(&asset.name);
-    let checksum_url = checksum_url_for(&asset.name);
-    if let Some(checksum_url) = checksum_url {
-        download_checksum(
-            &checksum_url,
-            &temp_dir.join(format!("{}.sha256", asset.name)),
-        )?;
-    }
-
     download_file(&asset.browser_download_url, &archive_path, tx.clone())?;
 
     tx.send(UpdateInstallStatus::Verifying).ok();
-    verify_archive_checksum(&archive_path, &asset.name)?;
+    if let Some(checksum_asset) = checksum_asset {
+        let checksum_path = temp_dir.join(&checksum_asset.name);
+        download_checksum(&checksum_asset.browser_download_url, &checksum_path)?;
+        verify_archive_checksum(&archive_path, &asset.name, &checksum_path)?;
+    }
 
     let extracted = extract_archive(&archive_path, &temp_dir)?;
 
@@ -137,12 +143,27 @@ fn download_file(url: &str, path: &Path, tx: mpsc::Sender<UpdateInstallStatus>) 
     Ok(())
 }
 
-fn verify_archive_checksum(archive_path: &Path, asset_name: &str) -> Result<()> {
-    let checksum_path = current_checksum_path(asset_name);
-    let checksum = fs::read_to_string(checksum_path).unwrap_or_else(|_| String::from(""));
-    if checksum.is_empty() {
-        return Ok(());
-    }
+fn verify_archive_checksum(
+    archive_path: &Path,
+    asset_name: &str,
+    checksum_path: &Path,
+) -> Result<()> {
+    let checksum_text = fs::read_to_string(checksum_path)
+        .with_context(|| format!("failed to read checksum file: {}", checksum_path.display()))?;
+
+    let expected = checksum_text
+        .lines()
+        .find_map(|line| {
+            let mut parts = line.split_whitespace();
+            let hash = parts.next()?;
+            let file = parts.next()?.trim_start_matches('*');
+            if file == asset_name {
+                Some(hash.to_ascii_lowercase())
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| anyhow!("no checksum entry for asset {}", asset_name))?;
 
     let mut file = File::open(archive_path)?;
     let mut hasher = Sha256::new();
@@ -157,25 +178,19 @@ fn verify_archive_checksum(archive_path: &Path, asset_name: &str) -> Result<()> 
     let digest = hasher.finalize();
     let digest_hex = digest
         .iter()
-        .map(|b| format!("{b:02x}"))
+        .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    if !checksum.contains(&digest_hex) {
-        return Err(anyhow!("checksum mismatch for {}", asset_name));
+
+    if digest_hex != expected {
+        return Err(anyhow!(
+            "checksum mismatch for {} (expected {}, got {})",
+            asset_name,
+            expected,
+            digest_hex
+        ));
     }
+
     Ok(())
-}
-
-fn current_checksum_path(asset_name: &str) -> PathBuf {
-    let mut path = std::env::temp_dir().join("stassh-update");
-    path.push(format!("{}.sha256", asset_name));
-    path
-}
-
-fn checksum_url_for(_asset_name: &str) -> Option<String> {
-    Some(
-        "https://github.com/getstassh/stassh/releases/latest/download/stassh-checksums.txt"
-            .to_string(),
-    )
 }
 
 fn download_checksum(url: &str, path: &Path) -> Result<()> {
@@ -190,6 +205,15 @@ fn download_checksum(url: &str, path: &Path) -> Result<()> {
 }
 
 fn extract_archive(archive_path: &Path, temp_dir: &Path) -> Result<PathBuf> {
+    let mut magic = [0u8; 2];
+    let mut header_file = File::open(archive_path)?;
+    header_file.read_exact(&mut magic)?;
+    if magic != [0x1f, 0x8b] {
+        return Err(anyhow!(
+            "downloaded file is not gzip (invalid header), likely wrong asset URL"
+        ));
+    }
+
     let file = File::open(archive_path)?;
     let decoder = GzDecoder::new(file);
     let mut archive = tar::Archive::new(decoder);
@@ -210,18 +234,39 @@ fn extract_archive(archive_path: &Path, temp_dir: &Path) -> Result<PathBuf> {
 fn replace_current_binary(new_binary: &Path) -> Result<()> {
     let current = std::env::current_exe()?;
     let backup = current.with_extension("bak");
+    let staged = current.with_extension("new");
+
+    if staged.exists() {
+        let _ = fs::remove_file(&staged);
+    }
+    fs::copy(new_binary, &staged)?;
 
     if backup.exists() {
         let _ = fs::remove_file(&backup);
     }
     fs::copy(&current, &backup)?;
-    fs::copy(new_binary, &current)?;
 
-    if !cfg!(target_os = "windows") {
-        let mut perms = fs::metadata(&current)?.permissions();
+    #[cfg(unix)]
+    {
         use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&staged)?.permissions();
         perms.set_mode(0o755);
-        fs::set_permissions(&current, perms)?;
+        fs::set_permissions(&staged, perms)?;
+    }
+
+    #[cfg(unix)]
+    {
+        fs::rename(&staged, &current)?;
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = fs::remove_file(&current);
+        fs::rename(&staged, &current)?;
+    }
+
+    if staged.exists() {
+        let _ = fs::remove_file(&staged);
     }
 
     Ok(())
@@ -242,13 +287,20 @@ fn version_from_tag(tag: &str) -> Result<Version> {
     Ok(Version::parse(normalized)?)
 }
 
-fn select_asset(assets: &[ReleaseAsset]) -> Result<ReleaseAsset> {
+fn select_archive_asset(assets: &[ReleaseAsset]) -> Result<ReleaseAsset> {
     let target = current_target_triple();
     assets
         .iter()
-        .find(|asset| asset.name.contains(target))
+        .find(|asset| asset.name.contains(target) && asset.name.ends_with(".tar.gz"))
         .cloned()
         .ok_or_else(|| anyhow!("no matching update asset for target {target}"))
+}
+
+fn select_checksum_asset(assets: &[ReleaseAsset]) -> Option<ReleaseAsset> {
+    assets
+        .iter()
+        .find(|asset| asset.name == "SHA256SUMS" || asset.name == "stassh-checksums.txt")
+        .cloned()
 }
 
 fn current_target_triple() -> &'static str {

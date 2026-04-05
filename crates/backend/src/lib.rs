@@ -8,7 +8,8 @@ mod version;
 pub use crate::config::Config;
 pub use crate::db::{Database, DbEncryption, HostAuth, SshHost, TrustedHostKey};
 pub use crate::update::{
-    ReleaseAsset, UpdateCheckStatus, UpdateInstallStatus, start_update_install,
+    ReleaseAsset, UpdateCheckStatus, UpdateInstallStatus, check_for_updates as check_for_update,
+    start_update_install,
 };
 pub use crate::version::{VersionCheckStatus, check_for_updates};
 
