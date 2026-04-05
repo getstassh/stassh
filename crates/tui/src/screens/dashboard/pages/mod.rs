@@ -1,4 +1,3 @@
-pub(super) mod credits;
 pub(super) mod debug;
 pub(super) mod home;
 pub(super) mod settings;

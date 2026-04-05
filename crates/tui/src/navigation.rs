@@ -68,7 +68,6 @@ pub(crate) enum DashboardPage {
     Home,
     Settings,
     Debug,
-    Credits,
     Ssh,
 }
 

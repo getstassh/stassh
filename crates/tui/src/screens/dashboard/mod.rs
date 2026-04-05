@@ -81,7 +81,7 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
             }
         }
         DashboardPage::Ssh => pages::ssh::handle_key(key, state),
-        DashboardPage::Settings | DashboardPage::Credits => None,
+        DashboardPage::Settings => None,
     }
 }
 
@@ -492,14 +492,7 @@ fn build_quick_switch_items(
             label: "Debug".to_string(),
             target: QuickSwitchTarget::Page(DashboardPage::Debug),
         });
-        number += 1;
     }
-
-    items.push(QuickSwitchItem {
-        number,
-        label: "Credits".to_string(),
-        target: QuickSwitchTarget::Page(DashboardPage::Credits),
-    });
 
     items
 }
@@ -621,7 +614,6 @@ fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
                 pages::home::render(frame, content_area, app, state)
             }
         }
-        DashboardPage::Credits => pages::credits::render(frame, content_area),
         DashboardPage::Ssh => pages::ssh::render(frame, a, content_area, state),
     }
 
@@ -810,7 +802,6 @@ fn keybind_hint(state: &DashboardState, app: &AppState, area: Rect) -> &'static 
         DashboardPage::Home => pages::home::footer_hint(),
         DashboardPage::Settings => "Ctrl+Q quick switch | Esc exit",
         DashboardPage::Debug => pages::debug::footer_hint(pages::debug::has_scrollbar(app, area)),
-        DashboardPage::Credits => "Ctrl+Q quick switch | Esc exit",
         DashboardPage::Ssh => pages::ssh::footer_hint(),
     }
 }
