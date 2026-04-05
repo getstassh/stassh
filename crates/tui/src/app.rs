@@ -56,7 +56,7 @@ impl App {
     }
 
     pub(crate) fn has_modal_open(&self) -> bool {
-        matches!(&self.screen, Screen::Dashboard { state } if state.host_modal.is_some())
+        matches!(&self.screen, Screen::Dashboard { state } if state.host_modal.is_some() || state.quick_switcher.is_some())
     }
 }
 

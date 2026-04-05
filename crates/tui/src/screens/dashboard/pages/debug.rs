@@ -52,5 +52,5 @@ pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &Dash
 }
 
 pub(crate) fn footer_hint() -> &'static str {
-    "j/k or Up/Down scroll | PageUp/PageDown jump | Ctrl+B toggle sidebar | Esc exit"
+    "j/k or Up/Down scroll | PageUp/PageDown jump | Ctrl+Q quick switch | Esc exit"
 }

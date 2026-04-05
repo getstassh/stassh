@@ -74,9 +74,9 @@ pub(crate) enum DashboardPage {
 
 pub(crate) struct DashboardState {
     pub(crate) active_page: DashboardPage,
-    pub(crate) sidebar_cursor: usize,
     pub(crate) selected_host: usize,
     pub(crate) host_modal: Option<HostModalState>,
+    pub(crate) quick_switcher: Option<QuickSwitcherState>,
     pub(crate) last_status: Option<String>,
     pub(crate) debug_scroll: u16,
     pub(crate) host_statuses: HashMap<u32, HostConnectionStatus>,
@@ -88,14 +88,12 @@ pub(crate) struct DashboardState {
 }
 
 impl DashboardState {
-    pub(crate) const FIXED_SIDEBAR_ITEMS: usize = 4;
-
     pub(crate) fn new() -> Self {
         Self {
             active_page: DashboardPage::Home,
-            sidebar_cursor: 0,
             selected_host: 0,
             host_modal: None,
+            quick_switcher: None,
             last_status: None,
             debug_scroll: 0,
             host_statuses: HashMap::new(),
@@ -106,9 +104,20 @@ impl DashboardState {
             active_ssh_tab: None,
         }
     }
+}
 
-    pub(crate) fn sidebar_items_count(&self) -> usize {
-        Self::FIXED_SIDEBAR_ITEMS + self.ssh_tabs.len()
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct QuickSwitcherState {
+    pub(crate) query: String,
+    pub(crate) selected_idx: usize,
+}
+
+impl QuickSwitcherState {
+    pub(crate) fn new() -> Self {
+        Self {
+            query: String::new(),
+            selected_idx: 0,
+        }
     }
 }
 

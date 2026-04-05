@@ -92,7 +92,7 @@ pub(crate) fn migrate_db_value(value: Value) -> Result<(Database, bool)> {
     Ok((db.into_latest(), changed))
 }
 
-pub(crate) const LATEST_CONFIG_VERSION: &str = "2";
+pub(crate) const LATEST_CONFIG_VERSION: &str = "3";
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "version")]
 enum ConfigAny {
@@ -116,6 +116,14 @@ enum ConfigAny {
         enable_telemetry: Option<bool>,
         db_encryption: Option<DbEncryption>,
         show_sidebar: bool,
+        ssh_idle_timeout_seconds: u64,
+        ssh_connect_timeout_seconds: u64,
+    },
+
+    #[serde(rename = "3")]
+    V3 {
+        enable_telemetry: Option<bool>,
+        db_encryption: Option<DbEncryption>,
         ssh_idle_timeout_seconds: u64,
         ssh_connect_timeout_seconds: u64,
     },
@@ -146,23 +154,33 @@ impl ConfigAny {
                 ssh_idle_timeout_seconds: *ssh_idle_timeout_seconds,
                 ssh_connect_timeout_seconds: 5,
             }),
-            Self::V2 { .. } => None,
+            Self::V2 {
+                enable_telemetry,
+                db_encryption,
+                ssh_idle_timeout_seconds,
+                ssh_connect_timeout_seconds,
+                ..
+            } => Some(Self::V3 {
+                enable_telemetry: *enable_telemetry,
+                db_encryption: db_encryption.clone(),
+                ssh_idle_timeout_seconds: *ssh_idle_timeout_seconds,
+                ssh_connect_timeout_seconds: *ssh_connect_timeout_seconds,
+            }),
+            Self::V3 { .. } => None,
         }
     }
 
     fn into_latest(self) -> Config {
         match self {
-            Self::V2 {
+            Self::V3 {
                 enable_telemetry,
                 db_encryption,
-                show_sidebar,
                 ssh_idle_timeout_seconds,
                 ssh_connect_timeout_seconds,
             } => Config {
                 version: LATEST_CONFIG_VERSION,
                 enable_telemetry,
                 db_encryption,
-                show_sidebar,
                 ssh_idle_timeout_seconds: ssh_idle_timeout_seconds.max(1),
                 ssh_connect_timeout_seconds: ssh_connect_timeout_seconds.max(1),
             },

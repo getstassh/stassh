@@ -7,10 +7,10 @@ use std::{
 use backend::{AppState, HostAuth, SshHost};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     widgets::{Block, Borders, Clear, Paragraph},
-    Frame,
 };
 
 use crate::{
@@ -44,57 +44,17 @@ pub(crate) static HANDLER: ScreenHandler<DashboardState> = ScreenHandler {
 };
 
 fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
-    if key.code == KeyCode::Char('b') && key.modifiers.contains(KeyModifiers::CONTROL) {
-        let current = app.config.show_sidebar;
-        return Some(Box::new(move |app| {
-            app.config.show_sidebar = !current;
-            let _ = app.save_config();
-        }));
-    }
-
     if let Some(modal) = &mut state.host_modal {
         return handle_modal_key(app, key, state.selected_host, modal);
     }
 
-    match key.code {
-        KeyCode::Char('1') => {
-            state.active_page = DashboardPage::Home;
-            state.sidebar_cursor = 0;
-        }
-        KeyCode::Char('2') => {
-            state.active_page = DashboardPage::Settings;
-            state.sidebar_cursor = 1;
-        }
-        KeyCode::Char('3') => {
-            state.active_page = DashboardPage::Debug;
-            state.sidebar_cursor = 2;
-        }
-        KeyCode::Char('4') => {
-            state.active_page = DashboardPage::Credits;
-            state.sidebar_cursor = 3;
-        }
-        _ => {}
+    if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        state.quick_switcher = Some(crate::navigation::QuickSwitcherState::new());
+        return None;
     }
 
-    if app.config.show_sidebar {
-        match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                state.sidebar_cursor = state.sidebar_cursor.saturating_sub(1);
-                return None;
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let max = state.sidebar_items_count().saturating_sub(1);
-                state.sidebar_cursor = (state.sidebar_cursor + 1).min(max);
-                return None;
-            }
-            KeyCode::Enter => {
-                activate_sidebar_selection(state);
-                return None;
-            }
-            _ => {}
-        }
-
-        return None;
+    if state.quick_switcher.is_some() {
+        return handle_quick_switcher_key(key, state);
     }
 
     match state.active_page {
@@ -108,6 +68,12 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
 fn handle_paste(_app: &AppState, text: &str, state: &mut DashboardState) -> Option<AppEffect> {
     if let Some(modal) = &mut state.host_modal {
         insert_pasted_text(&mut modal.form, text);
+        return None;
+    }
+
+    if let Some(switcher) = &mut state.quick_switcher {
+        switcher.query.push_str(text);
+        switcher.selected_idx = 0;
         return None;
     }
 
@@ -423,75 +389,160 @@ fn validate_form(form: &HostFormState) -> Result<(String, String, String, u16, H
 }
 
 #[derive(Clone, Copy)]
-enum SidebarTarget {
+enum QuickSwitchTarget {
     Page(DashboardPage),
     Session(usize),
 }
 
-fn sidebar_target_for_cursor(state: &DashboardState) -> SidebarTarget {
-    let idx = state
-        .sidebar_cursor
-        .min(state.sidebar_items_count().saturating_sub(1));
-
-    match idx {
-        0 => SidebarTarget::Page(DashboardPage::Home),
-        1 => SidebarTarget::Page(DashboardPage::Settings),
-        2 => SidebarTarget::Page(DashboardPage::Debug),
-        3 => SidebarTarget::Page(DashboardPage::Credits),
-        n => SidebarTarget::Session(n - DashboardState::FIXED_SIDEBAR_ITEMS),
-    }
+struct QuickSwitchItem {
+    number: usize,
+    label: String,
+    target: QuickSwitchTarget,
 }
 
-fn activate_sidebar_selection(state: &mut DashboardState) {
-    match sidebar_target_for_cursor(state) {
-        SidebarTarget::Page(page) => {
+fn build_quick_switch_items(state: &DashboardState) -> Vec<QuickSwitchItem> {
+    let mut items = Vec::new();
+    let mut number = 1;
+
+    items.push(QuickSwitchItem {
+        number,
+        label: "Home".to_string(),
+        target: QuickSwitchTarget::Page(DashboardPage::Home),
+    });
+    number += 1;
+
+    for (idx, tab) in state.ssh_tabs.iter().enumerate() {
+        items.push(QuickSwitchItem {
+            number,
+            label: tab.title.clone(),
+            target: QuickSwitchTarget::Session(idx),
+        });
+        number += 1;
+    }
+
+    items.push(QuickSwitchItem {
+        number,
+        label: "Settings".to_string(),
+        target: QuickSwitchTarget::Page(DashboardPage::Settings),
+    });
+    number += 1;
+    items.push(QuickSwitchItem {
+        number,
+        label: "Debug".to_string(),
+        target: QuickSwitchTarget::Page(DashboardPage::Debug),
+    });
+    number += 1;
+    items.push(QuickSwitchItem {
+        number,
+        label: "Credits".to_string(),
+        target: QuickSwitchTarget::Page(DashboardPage::Credits),
+    });
+
+    items
+}
+
+fn filtered_quick_switch_indices(state: &DashboardState, items: &[QuickSwitchItem]) -> Vec<usize> {
+    let query = state
+        .quick_switcher
+        .as_ref()
+        .map(|s| s.query.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if query.is_empty() {
+        return (0..items.len()).collect();
+    }
+
+    items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| {
+            let label_match = item.label.to_ascii_lowercase().contains(&query);
+            let number_match = item.number.to_string().contains(&query);
+            label_match || number_match
+        })
+        .map(|(idx, _)| idx)
+        .collect()
+}
+
+fn activate_quick_switch_target(state: &mut DashboardState, target: QuickSwitchTarget) {
+    match target {
+        QuickSwitchTarget::Page(page) => {
             state.active_page = page;
-            state.sidebar_cursor = match page {
-                DashboardPage::Home => 0,
-                DashboardPage::Settings => 1,
-                DashboardPage::Debug => 2,
-                DashboardPage::Credits => 3,
-                DashboardPage::Ssh => state.sidebar_cursor,
-            };
         }
-        SidebarTarget::Session(tab_idx) => {
-            if tab_idx < state.ssh_tabs.len() {
+        QuickSwitchTarget::Session(idx) => {
+            if idx < state.ssh_tabs.len() {
+                state.active_ssh_tab = Some(idx);
                 state.active_page = DashboardPage::Ssh;
-                state.active_ssh_tab = Some(tab_idx);
-                state.sidebar_cursor = DashboardState::FIXED_SIDEBAR_ITEMS + tab_idx;
             }
         }
     }
+
+    state.quick_switcher = None;
+}
+
+fn handle_quick_switcher_key(key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
+    let items = build_quick_switch_items(state);
+
+    let filtered_indices = filtered_quick_switch_indices(state, &items);
+    let selected_idx = state
+        .quick_switcher
+        .as_ref()
+        .map(|s| s.selected_idx)
+        .unwrap_or(0)
+        .min(filtered_indices.len().saturating_sub(1));
+
+    match key.code {
+        KeyCode::Esc => {
+            state.quick_switcher = None;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(switcher) = &mut state.quick_switcher {
+                switcher.selected_idx = switcher.selected_idx.saturating_sub(1);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(switcher) = &mut state.quick_switcher {
+                let max = filtered_indices.len().saturating_sub(1);
+                switcher.selected_idx = (switcher.selected_idx + 1).min(max);
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(switcher) = &mut state.quick_switcher {
+                switcher.query.pop();
+                switcher.selected_idx = 0;
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(item_idx) = filtered_indices.get(selected_idx)
+                && let Some(item) = items.get(*item_idx)
+            {
+                activate_quick_switch_target(state, item.target);
+            }
+        }
+        KeyCode::Char(c)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) =>
+        {
+            if let Some(switcher) = &mut state.quick_switcher {
+                switcher.query.push(c);
+                switcher.selected_idx = 0;
+            }
+        }
+        _ => {}
+    }
+
+    None
 }
 
 fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
     let a = frame.area();
-    let footer = keybind_hint(state, app.config.show_sidebar);
+    let footer = keybind_hint(state);
     let (inner, area) = full_rect(a, "Stassh", footer);
     frame.render_widget(inner, a);
-
-    let layout = if app.config.show_sidebar {
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(28), Constraint::Min(0)])
-            .split(area)
-    } else {
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(100), Constraint::Length(0)])
-            .split(area)
-    };
-
-    let mut content_host = layout[1];
-    if app.config.show_sidebar {
-        render_sidebar(frame, layout[0], state);
-    } else {
-        content_host = layout[0];
-    }
-
     let content_block = Block::default();
-    let content_area = content_block.inner(content_host);
-    frame.render_widget(content_block, content_host);
+    let content_area = content_block.inner(area);
+    frame.render_widget(content_block, area);
 
     match state.active_page {
         DashboardPage::Home => pages::home::render(frame, content_area, app, state),
@@ -504,103 +555,72 @@ fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
     if let Some(modal) = &state.host_modal {
         render_host_modal(frame, a, modal);
     }
-}
 
-fn render_sidebar(frame: &mut Frame, area: Rect, state: &DashboardState) {
-    let sidebar_block = Block::default()
-        .borders(Borders::RIGHT)
-        .border_style(Style::default().fg(Color::DarkGray))
-        .style(Style::default().bg(Color::Black));
-    let sidebar_area = sidebar_block.inner(area);
-    frame.render_widget(sidebar_block, area);
-
-    let mut constraints = vec![Constraint::Length(3); state.sidebar_items_count()];
-    constraints.push(Constraint::Fill(1));
-    let nav_areas = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(sidebar_area);
-
-    render_sidebar_item(
-        frame,
-        nav_areas[0],
-        state,
-        0,
-        "Home",
-        SidebarTarget::Page(DashboardPage::Home),
-    );
-    render_sidebar_item(
-        frame,
-        nav_areas[1],
-        state,
-        1,
-        "Settings",
-        SidebarTarget::Page(DashboardPage::Settings),
-    );
-    render_sidebar_item(
-        frame,
-        nav_areas[2],
-        state,
-        2,
-        "Debug",
-        SidebarTarget::Page(DashboardPage::Debug),
-    );
-    render_sidebar_item(
-        frame,
-        nav_areas[3],
-        state,
-        3,
-        "Credits",
-        SidebarTarget::Page(DashboardPage::Credits),
-    );
-
-    for (session_idx, tab) in state.ssh_tabs.iter().enumerate() {
-        let item_idx = DashboardState::FIXED_SIDEBAR_ITEMS + session_idx;
-        render_sidebar_item(
-            frame,
-            nav_areas[item_idx],
-            state,
-            item_idx,
-            &tab.title,
-            SidebarTarget::Session(session_idx),
-        );
+    if state.quick_switcher.is_some() {
+        render_quick_switcher_modal(frame, a, state);
     }
 }
 
-fn render_sidebar_item(
-    frame: &mut Frame,
-    area: Rect,
-    state: &DashboardState,
-    index: usize,
-    title: &str,
-    target: SidebarTarget,
-) {
-    let cursor_selected = state.sidebar_cursor == index;
-    let active = match target {
-        SidebarTarget::Page(page) => state.active_page == page,
-        SidebarTarget::Session(tab_idx) => {
-            state.active_page == DashboardPage::Ssh && state.active_ssh_tab == Some(tab_idx)
+fn render_quick_switcher_modal(frame: &mut Frame, app_area: Rect, state: &DashboardState) {
+    let width = (app_area.width.saturating_sub(8)).min(90);
+    let height = 18;
+    let popup_area = centered_rect_no_border(width, height, app_area);
+
+    let items = build_quick_switch_items(state);
+    let filtered_indices = filtered_quick_switch_indices(state, &items);
+    let selected = state
+        .quick_switcher
+        .as_ref()
+        .map(|s| s.selected_idx)
+        .unwrap_or(0)
+        .min(filtered_indices.len().saturating_sub(1));
+    let query = state
+        .quick_switcher
+        .as_ref()
+        .map(|s| s.query.as_str())
+        .unwrap_or("");
+
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .title(" Quick Switcher ")
+        .title_bottom(" Type to search | Up/Down select | Enter open | Esc close ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(0)])
+        .split(inner);
+
+    frame.render_widget(Paragraph::new(format!("search: {query}")), sections[0]);
+
+    let visible_count = sections[1].height.saturating_sub(1) as usize;
+    let start = selected.saturating_sub(visible_count.saturating_sub(1));
+    let mut lines = Vec::new();
+
+    if filtered_indices.is_empty() {
+        lines.push("  no matches".to_string());
+    } else {
+        for (display_idx, item_idx) in filtered_indices
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(visible_count)
+        {
+            if let Some(item) = items.get(*item_idx) {
+                let prefix = if display_idx == selected { ">" } else { " " };
+                lines.push(format!("{prefix} {:>2}. {}", item.number, item.label));
+            }
         }
-    };
+    }
 
-    let border = if cursor_selected {
-        Style::default().fg(Color::Yellow)
-    } else if active {
-        Style::default().fg(Color::Green)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-    let block = Block::default().borders(Borders::ALL).border_style(border);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let label = if cursor_selected {
-        format!("> {} {}", index + 1, title)
-    } else {
-        format!("  {} {}", index + 1, title)
-    };
-    let text = Paragraph::new(label).alignment(Alignment::Left);
-    frame.render_widget(text, inner);
+    frame.render_widget(
+        Paragraph::new(lines.join("\n")).alignment(Alignment::Left),
+        sections[1],
+    );
 }
 
 fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) {
@@ -714,20 +734,20 @@ fn modal_line(label: &str, value: &str, selected: bool) -> String {
     format!("{prefix} {label:10} {value}")
 }
 
-fn keybind_hint(state: &DashboardState, sidebar_visible: bool) -> &'static str {
+fn keybind_hint(state: &DashboardState) -> &'static str {
     if state.host_modal.is_some() {
         return "HOST form: Tab/Shift+Tab move field | Ctrl+S save | Esc cancel/exit";
     }
 
-    if sidebar_visible {
-        return "Use Up/Down (j/k) to choose | Enter open page/session | Ctrl+B hide sidebar | Esc exit";
+    if state.quick_switcher.is_some() {
+        return "SWITCHER: type to filter | Up/Down select | Enter open | Esc close";
     }
 
     match state.active_page {
         DashboardPage::Home => pages::home::footer_hint(),
-        DashboardPage::Settings => "Ctrl+B toggle sidebar | Esc exit",
+        DashboardPage::Settings => "Ctrl+Q quick switch | Esc exit",
         DashboardPage::Debug => pages::debug::footer_hint(),
-        DashboardPage::Credits => "Ctrl+B toggle sidebar | Esc exit",
+        DashboardPage::Credits => "Ctrl+Q quick switch | Esc exit",
         DashboardPage::Ssh => pages::ssh::footer_hint(),
     }
 }

@@ -1,10 +1,10 @@
 use backend::{AppState, HostAuth, SshHost};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 use crate::{
@@ -53,7 +53,7 @@ pub(crate) fn handle_key(
         KeyCode::Enter => {
             if let Some(host) = app.db.hosts.get(state.selected_host) {
                 let host_id = host.id;
-                let title = format!("{}@{}:{}", host.user, host.host, host.port);
+                let title = format!("{} - {}@{}:{}", host.name, host.user, host.host, host.port);
                 let rows_cols = crossterm::terminal::size().unwrap_or((120, 40));
                 let rows = rows_cols.1;
                 let cols = rows_cols.0;
@@ -63,7 +63,6 @@ pub(crate) fn handle_key(
                 let idx = state.ssh_tabs.len().saturating_sub(1);
                 state.active_ssh_tab = Some(idx);
                 state.active_page = DashboardPage::Ssh;
-                state.sidebar_cursor = DashboardState::FIXED_SIDEBAR_ITEMS + idx;
             }
         }
         _ => {}
@@ -130,7 +129,7 @@ pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &Dash
 }
 
 pub(crate) fn footer_hint() -> &'static str {
-    "HOME: arrows or hjkl move | A add | E edit | Enter connect | R refresh | Ctrl+B toggle sidebar | Esc exit"
+    "HOME: arrows or hjkl move | A add | E edit | Enter connect | Ctrl+Q quick switch | Esc exit"
 }
 
 fn render_host_card(

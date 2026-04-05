@@ -1,32 +1,30 @@
 use backend::{AppState, TrustedHostKey};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, Paragraph},
-    Frame,
 };
 
 use crate::{
     navigation::{DashboardPage, DashboardState, SshSessionPhase},
     screens::AppEffect,
     ssh_client::{
-        start_session_async, SessionEvent, SessionInput, StartSessionResult, TrustChallenge,
+        SessionEvent, SessionInput, StartSessionResult, TrustChallenge, start_session_async,
     },
 };
 
 pub(crate) fn handle_key(key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
     let Some(tab_idx) = state.active_ssh_tab else {
         state.active_page = DashboardPage::Home;
-        state.sidebar_cursor = 0;
         return None;
     };
 
     let Some(tab) = state.ssh_tabs.get_mut(tab_idx) else {
         state.active_ssh_tab = None;
         state.active_page = DashboardPage::Home;
-        state.sidebar_cursor = 0;
         return None;
     };
 
@@ -251,7 +249,7 @@ pub(crate) fn render(frame: &mut Frame, app_area: Rect, area: Rect, state: &Dash
 }
 
 pub(crate) fn footer_hint() -> &'static str {
-    "SSH: type to send input | Esc disconnect active | Ctrl+B toggle sidebar"
+    "SSH: type to send input | Esc disconnect active | Ctrl+Q quick switch"
 }
 
 fn close_ssh_tab(state: &mut DashboardState, idx: usize, status: String) {
@@ -265,15 +263,11 @@ fn close_ssh_tab(state: &mut DashboardState, idx: usize, status: String) {
     if state.ssh_tabs.is_empty() {
         state.active_ssh_tab = None;
         state.active_page = DashboardPage::Home;
-        state.sidebar_cursor = 0;
         return;
     }
 
     let next_idx = idx.min(state.ssh_tabs.len().saturating_sub(1));
     state.active_ssh_tab = Some(next_idx);
-    if state.active_page == DashboardPage::Ssh {
-        state.sidebar_cursor = DashboardState::FIXED_SIDEBAR_ITEMS + next_idx;
-    }
 }
 
 fn trust_host_key(app: &mut crate::app::App, key: TrustedHostKey) {
