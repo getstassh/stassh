@@ -293,56 +293,116 @@ async fn connect_and_run(
         keepalive_max: 3,
         ..Default::default()
     });
+    let mut last_error: Option<anyhow::Error> = None;
+    let mut session = None;
 
-    let handler = VerifyHandler {
-        host: host.host.clone(),
-        port: host.port,
-        trusted_host_keys,
-        shared,
-    };
+    for endpoint in host.endpoints {
+        let handler = VerifyHandler {
+            host: endpoint.host.clone(),
+            port: endpoint.port,
+            trusted_host_keys: trusted_host_keys.clone(),
+            shared: Arc::clone(&shared),
+        };
 
-    let addr = (host.host.as_str(), host.port);
-    let mut session =
-        match tokio::time::timeout(connect_timeout, client::connect(config, addr, handler)).await {
-            Ok(result) => result.context("failed to establish SSH connection")?,
+        let addr = (endpoint.host.as_str(), endpoint.port);
+        let connect_result = tokio::time::timeout(
+            connect_timeout,
+            client::connect(config.clone(), addr, handler),
+        )
+        .await;
+        let mut candidate = match connect_result {
+            Ok(Ok(session)) => session,
+            Ok(Err(err)) => {
+                last_error = Some(anyhow::anyhow!(
+                    "failed to connect to {}:{}: {err}",
+                    endpoint.host,
+                    endpoint.port
+                ));
+                continue;
+            }
             Err(_) => {
-                bail!("SSH connect timed out after {}s", connect_timeout.as_secs());
+                last_error = Some(anyhow::anyhow!(
+                    "connect timeout to {}:{} after {}s",
+                    endpoint.host,
+                    endpoint.port,
+                    connect_timeout.as_secs()
+                ));
+                continue;
             }
         };
 
-    match &host.auth {
-        HostAuth::Key { key_path } => {
-            let private_key = load_secret_key(key_path, None)
-                .with_context(|| format!("failed to load private key at {key_path}"))?;
-            let hash_alg = session
-                .best_supported_rsa_hash()
-                .await
-                .context("failed to detect RSA hash algorithm")?
-                .flatten();
-
-            let auth_result = session
-                .authenticate_publickey(
-                    host.user.clone(),
-                    PrivateKeyWithHashAlg::new(Arc::new(private_key), hash_alg),
-                )
-                .await
-                .context("public key authentication failed")?;
-
-            if !matches!(auth_result, AuthResult::Success) {
-                bail!("authentication rejected by server");
+        let auth_result = match &host.auth {
+            HostAuth::KeyPath { key_path } => {
+                let private_key = load_secret_key(key_path, None)
+                    .with_context(|| format!("failed to load private key at {key_path}"))?;
+                let hash_alg = candidate
+                    .best_supported_rsa_hash()
+                    .await
+                    .context("failed to detect RSA hash algorithm")?
+                    .flatten();
+                candidate
+                    .authenticate_publickey(
+                        host.user.clone(),
+                        PrivateKeyWithHashAlg::new(Arc::new(private_key), hash_alg),
+                    )
+                    .await
+                    .context("public key authentication failed")?
             }
-        }
-        HostAuth::Password { password } => {
-            let auth_result = session
+            HostAuth::KeyInline { private_key } => {
+                let temp_path = std::env::temp_dir()
+                    .join(format!("stassh-inline-key-{}.pem", uuid::Uuid::new_v4()));
+                std::fs::write(&temp_path, private_key).with_context(|| {
+                    format!("failed to write temporary key {}", temp_path.display())
+                })?;
+                let key = load_secret_key(&temp_path, None)
+                    .with_context(|| "failed to parse pasted private key".to_string())?;
+                let _ = std::fs::remove_file(&temp_path);
+
+                let hash_alg = candidate
+                    .best_supported_rsa_hash()
+                    .await
+                    .context("failed to detect RSA hash algorithm")?
+                    .flatten();
+                candidate
+                    .authenticate_publickey(
+                        host.user.clone(),
+                        PrivateKeyWithHashAlg::new(Arc::new(key), hash_alg),
+                    )
+                    .await
+                    .context("inline key authentication failed")?
+            }
+            HostAuth::Password { password } => candidate
                 .authenticate_password(host.user.clone(), password.clone())
                 .await
-                .context("password authentication failed")?;
+                .context("password authentication failed")?,
+        };
 
-            if !matches!(auth_result, AuthResult::Success) {
-                bail!("authentication rejected by server");
-            }
+        if matches!(auth_result, AuthResult::Success) {
+            session = Some(candidate);
+            break;
         }
+
+        last_error = Some(anyhow::anyhow!(
+            "authentication rejected by {}:{}",
+            endpoint.host,
+            endpoint.port
+        ));
     }
+
+    let Some(session) = session else {
+        if let Some(challenge) = shared.lock().ok().and_then(|s| s.trust_challenge.clone()) {
+            bail!(
+                "host key verification required for {}:{} ({})",
+                challenge.proposed_key.host,
+                challenge.proposed_key.port,
+                challenge.proposed_key.fingerprint_sha256
+            );
+        }
+        if let Some(err) = last_error {
+            return Err(err);
+        }
+        bail!("no endpoints available for connection");
+    };
 
     let mut channel = session
         .channel_open_session()

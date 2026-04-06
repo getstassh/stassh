@@ -18,17 +18,23 @@ pub enum DbEncryption {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HostAuth {
-    Key { key_path: String },
+    KeyPath { key_path: String },
+    KeyInline { private_key: String },
     Password { password: String },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct SshEndpoint {
+    pub host: String,
+    pub port: u16,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SshHost {
     pub id: u32,
     pub name: String,
-    pub host: String,
     pub user: String,
-    pub port: u16,
+    pub endpoints: Vec<SshEndpoint>,
     pub auth: HostAuth,
 }
 

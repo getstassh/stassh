@@ -80,7 +80,7 @@ pub(crate) struct DashboardState {
     pub(crate) quick_switcher: Option<QuickSwitcherState>,
     pub(crate) last_status: Option<String>,
     pub(crate) debug_scroll: u16,
-    pub(crate) host_statuses: HashMap<u32, HostConnectionStatus>,
+    pub(crate) host_statuses: HashMap<u32, Vec<HostConnectionStatus>>,
     pub(crate) probe_tasks: Vec<HostProbeTask>,
     pub(crate) last_probe_at: Instant,
     pub(crate) needs_initial_probe: bool,
@@ -179,7 +179,7 @@ pub(crate) enum HostConnectionStatus {
 
 pub(crate) struct HostProbeTask {
     pub(crate) host_id: u32,
-    pub(crate) join: JoinHandle<bool>,
+    pub(crate) join: JoinHandle<Vec<HostConnectionStatus>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -197,9 +197,8 @@ pub(crate) enum HostAuthMode {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum HostFormField {
     Name,
-    Host,
     User,
-    Port,
+    Endpoints,
     AuthMode,
     AuthValue,
 }
@@ -207,10 +206,9 @@ pub(crate) enum HostFormField {
 impl HostFormField {
     pub(crate) fn next(self) -> Self {
         match self {
-            Self::Name => Self::Host,
-            Self::Host => Self::User,
-            Self::User => Self::Port,
-            Self::Port => Self::AuthMode,
+            Self::Name => Self::User,
+            Self::User => Self::Endpoints,
+            Self::Endpoints => Self::AuthMode,
             Self::AuthMode => Self::AuthValue,
             Self::AuthValue => Self::Name,
         }
@@ -219,25 +217,32 @@ impl HostFormField {
     pub(crate) fn prev(self) -> Self {
         match self {
             Self::Name => Self::AuthValue,
-            Self::Host => Self::Name,
-            Self::User => Self::Host,
-            Self::Port => Self::User,
-            Self::AuthMode => Self::Port,
+            Self::User => Self::Name,
+            Self::Endpoints => Self::User,
+            Self::AuthMode => Self::Endpoints,
             Self::AuthValue => Self::AuthMode,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum HostKeyInputMode {
+    Path,
+    Inline,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct HostFormState {
     pub(crate) focus: HostFormField,
     pub(crate) name: String,
-    pub(crate) host: String,
     pub(crate) user: String,
-    pub(crate) port: String,
+    pub(crate) endpoints: String,
     pub(crate) auth_mode: HostAuthMode,
+    pub(crate) key_input_mode: HostKeyInputMode,
     pub(crate) key_path: String,
+    pub(crate) key_inline: String,
     pub(crate) password: String,
+    pub(crate) caret: usize,
     pub(crate) error: Option<String>,
 }
 
@@ -246,12 +251,14 @@ impl HostFormState {
         Self {
             focus: HostFormField::Name,
             name: String::new(),
-            host: String::new(),
             user: String::new(),
-            port: String::from("22"),
+            endpoints: String::new(),
             auth_mode: HostAuthMode::Key,
+            key_input_mode: HostKeyInputMode::Path,
             key_path: String::new(),
+            key_inline: String::new(),
             password: String::new(),
+            caret: 0,
             error: None,
         }
     }
@@ -261,6 +268,13 @@ impl HostFormState {
 pub(crate) struct HostModalState {
     pub(crate) mode: HostModalMode,
     pub(crate) form: HostFormState,
+    pub(crate) key_picker: Option<HostKeyPickerState>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HostKeyPickerState {
+    pub(crate) options: Vec<String>,
+    pub(crate) selected: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]

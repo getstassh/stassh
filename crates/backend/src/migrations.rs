@@ -5,10 +5,50 @@ use serde_json::Value;
 use crate::{
     DbEncryption,
     config::Config,
-    db::{Database, SshHost, TrustedHostKey},
+    db::{Database, HostAuth, SshEndpoint, SshHost, TrustedHostKey},
 };
 
-pub(crate) const LATEST_DB_VERSION: &str = "3";
+pub(crate) const LATEST_DB_VERSION: &str = "4";
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum LegacyHostAuth {
+    Key { key_path: String },
+    KeyInline { private_key: String },
+    Password { password: String },
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct LegacySshHost {
+    id: u32,
+    name: String,
+    host: String,
+    user: String,
+    port: u16,
+    auth: LegacyHostAuth,
+}
+
+fn migrate_legacy_host(host: LegacySshHost) -> SshHost {
+    let auth = match host.auth {
+        LegacyHostAuth::Key { key_path } => HostAuth::KeyPath { key_path },
+        LegacyHostAuth::KeyInline { private_key } => HostAuth::KeyInline { private_key },
+        LegacyHostAuth::Password { password } => HostAuth::Password { password },
+    };
+
+    let mut endpoints = Vec::with_capacity(1);
+    endpoints.push(SshEndpoint {
+        host: host.host,
+        port: host.port,
+    });
+
+    SshHost {
+        id: host.id,
+        name: host.name,
+        user: host.user,
+        endpoints,
+        auth,
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "version")]
@@ -24,12 +64,19 @@ enum DatabaseAny {
 
     #[serde(rename = "2")]
     V2 {
-        hosts: Vec<SshHost>,
+        hosts: Vec<LegacySshHost>,
         next_host_id: u32,
     },
 
     #[serde(rename = "3")]
     V3 {
+        hosts: Vec<LegacySshHost>,
+        next_host_id: u32,
+        trusted_host_keys: Vec<TrustedHostKey>,
+    },
+
+    #[serde(rename = "4")]
+    V4 {
         hosts: Vec<SshHost>,
         next_host_id: u32,
         trusted_host_keys: Vec<TrustedHostKey>,
@@ -57,18 +104,28 @@ impl DatabaseAny {
                 trusted_host_keys: Vec::new(),
             }),
 
-            Self::V3 { .. } => None,
+            Self::V3 {
+                hosts,
+                next_host_id,
+                trusted_host_keys,
+            } => Some(Self::V4 {
+                hosts: hosts.clone().into_iter().map(migrate_legacy_host).collect(),
+                next_host_id: (*next_host_id).max(1),
+                trusted_host_keys: trusted_host_keys.clone(),
+            }),
+
+            Self::V4 { .. } => None,
         }
     }
 
     fn into_latest(self) -> Database {
         match self {
-            Self::V3 {
+            Self::V4 {
                 hosts,
                 next_host_id,
                 trusted_host_keys,
             } => Database {
-                version: "3",
+                version: LATEST_DB_VERSION,
                 hosts,
                 next_host_id: next_host_id.max(1),
                 trusted_host_keys,

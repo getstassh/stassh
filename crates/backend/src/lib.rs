@@ -6,7 +6,7 @@ mod update;
 mod version;
 
 pub use crate::config::Config;
-pub use crate::db::{Database, DbEncryption, HostAuth, SshHost, TrustedHostKey};
+pub use crate::db::{Database, DbEncryption, HostAuth, SshEndpoint, SshHost, TrustedHostKey};
 pub use crate::update::{
     ReleaseAsset, UpdateCheckStatus, UpdateInstallStatus, check_for_updates as check_for_update,
     start_update_install,

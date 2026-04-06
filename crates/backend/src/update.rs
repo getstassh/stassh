@@ -6,7 +6,7 @@ use std::{
     thread,
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use flate2::read::GzDecoder;
 use semver::Version;
 use serde::Deserialize;

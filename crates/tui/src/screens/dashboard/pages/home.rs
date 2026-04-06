@@ -1,4 +1,4 @@
-use backend::{AppState, HostAuth, SshHost};
+use backend::{AppState, HostAuth::*, SshHost};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
@@ -21,7 +21,7 @@ use crate::{
 };
 
 const HOME_GRID_COLUMNS: usize = 3;
-const HOST_CARD_HEIGHT: u16 = 6;
+const HOST_CARD_HEIGHT: u16 = 7;
 
 pub(crate) fn handle_key(
     app: &AppState,
@@ -33,6 +33,7 @@ pub(crate) fn handle_key(
             state.host_modal = Some(HostModalState {
                 mode: HostModalMode::Create,
                 form: HostFormState::new(),
+                key_picker: None,
             });
         }
         KeyCode::Char('e') => {
@@ -40,6 +41,7 @@ pub(crate) fn handle_key(
                 state.host_modal = Some(HostModalState {
                     mode: HostModalMode::Edit { host_id: host.id },
                     form: form_from_host(host),
+                    key_picker: None,
                 });
             }
         }
@@ -58,7 +60,11 @@ pub(crate) fn handle_key(
         KeyCode::Enter => {
             if let Some(host) = app.db.hosts.get(state.selected_host) {
                 let host_id = host.id;
-                let title = format!("{} - {}@{}:{}", host.name, host.user, host.host, host.port);
+                let primary = host.endpoints.first();
+                let endpoint = primary
+                    .map(|e| format!("{}:{}", e.host, e.port))
+                    .unwrap_or_else(|| "n/a".to_string());
+                let title = format!("{} - {}@{}", host.name, host.user, endpoint);
                 let rows_cols = crossterm::terminal::size().unwrap_or((120, 40));
                 let rows = rows_cols.1;
                 let cols = rows_cols.0;
@@ -131,12 +137,18 @@ pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &Dash
             let index = row_idx * columns + col_idx;
             if let Some(host) = app.db.hosts.get(index) {
                 let selected = index == state.selected_host;
-                let status = state
+                let statuses = state
                     .host_statuses
                     .get(&host.id)
-                    .copied()
-                    .unwrap_or(HostConnectionStatus::Unknown);
-                render_host_card(frame, *col_area, host, selected, status);
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        host.endpoints
+                            .clone()
+                            .into_iter()
+                            .map(|_| HostConnectionStatus::Unknown)
+                            .collect()
+                    });
+                render_host_card(frame, *col_area, host, selected, &statuses);
             }
         }
     }
@@ -151,11 +163,17 @@ fn render_host_card(
     area: Rect,
     host: &SshHost,
     selected: bool,
-    status: HostConnectionStatus,
+    statuses: &[HostConnectionStatus],
 ) {
+    let any_reachable = statuses
+        .iter()
+        .any(|s| matches!(s, HostConnectionStatus::Reachable));
+    let any_unknown = statuses
+        .iter()
+        .any(|s| matches!(s, HostConnectionStatus::Unknown));
     let border_style = if selected {
         selected_border()
-    } else if status == HostConnectionStatus::Unreachable {
+    } else if !any_reachable && !any_unknown {
         danger_text()
     } else {
         border()
@@ -178,29 +196,27 @@ fn render_host_card(
     frame.render_widget(block, area);
 
     let auth_label = match &host.auth {
-        HostAuth::Key { .. } => "key",
-        HostAuth::Password { .. } => "password",
+        KeyPath { .. } => "key(path)",
+        KeyInline { .. } => "key(inline)",
+        Password { .. } => "password",
     };
+
+    let statuses_line = status_letters(statuses);
+    let primary_endpoint = host
+        .endpoints
+        .first()
+        .map(|e| format!("{}@{}:{}", host.user, e.host, e.port))
+        .unwrap_or_else(|| format!("{}@n/a", host.user));
 
     let content = Paragraph::new(vec![
         Line::from(vec![
             Span::styled("endpoint: ", muted_text()),
-            Span::styled(format!("{}@{}:{}", host.user, host.host, host.port), text()),
+            Span::styled(primary_endpoint, text()),
         ]),
+        statuses_line,
         Line::from(vec![
             Span::styled("auth:     ", muted_text()),
             Span::styled(auth_label, text()),
-        ]),
-        Line::from(vec![
-            Span::styled("status:   ", muted_text()),
-            Span::styled(
-                host_status_label(status),
-                match status {
-                    HostConnectionStatus::Unknown => muted_text(),
-                    HostConnectionStatus::Reachable => success_text(),
-                    HostConnectionStatus::Unreachable => danger_text(),
-                },
-            ),
         ]),
     ])
     .style(Style::default().add_modifier(if selected {
@@ -211,31 +227,46 @@ fn render_host_card(
     frame.render_widget(content, inner);
 }
 
-fn host_status_label(status: HostConnectionStatus) -> &'static str {
-    match status {
-        HostConnectionStatus::Unknown => "unknown",
-        HostConnectionStatus::Reachable => "reachable",
-        HostConnectionStatus::Unreachable => "unreachable",
-    }
-}
-
 fn form_from_host(host: &SshHost) -> HostFormState {
     let mut form = HostFormState::new();
     form.name = host.name.clone();
-    form.host = host.host.clone();
     form.user = host.user.clone();
-    form.port = host.port.to_string();
+    form.endpoints = host
+        .endpoints
+        .iter()
+        .map(|e| format!("{}:{}", e.host, e.port))
+        .collect();
     match &host.auth {
-        HostAuth::Key { key_path } => {
+        KeyPath { key_path } => {
             form.auth_mode = crate::navigation::HostAuthMode::Key;
             form.key_path = key_path.clone();
         }
-        HostAuth::Password { password } => {
+        KeyInline { private_key } => {
+            form.auth_mode = crate::navigation::HostAuthMode::Key;
+            form.key_input_mode = crate::navigation::HostKeyInputMode::Inline;
+            form.key_inline = private_key.clone();
+        }
+        Password { password } => {
             form.auth_mode = crate::navigation::HostAuthMode::Password;
             form.password = password.clone();
         }
     }
     form
+}
+
+fn status_letters(statuses: &[HostConnectionStatus]) -> Line<'static> {
+    let mut spans = vec![Span::styled("status:   ", muted_text())];
+    for s in statuses {
+        let (letter, style) = match s {
+            HostConnectionStatus::Reachable => ("G", success_text()),
+            HostConnectionStatus::Unreachable => ("R", danger_text()),
+            HostConnectionStatus::Unknown => ("?", muted_text()),
+        };
+        spans.push(Span::styled(letter, style));
+        spans.push(Span::styled(" ", muted_text()));
+    }
+
+    Line::from(spans)
 }
 
 fn move_left(selected: usize, hosts_len: usize) -> usize {
