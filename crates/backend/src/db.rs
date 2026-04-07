@@ -359,7 +359,6 @@ fn load_or_init_config(conn: &Connection) -> Result<Config> {
                 telemetry_uuid,
                 last_telemetry_report_at_unix_ms,
                 db_encryption,
-                show_debug_panel,
                 ssh_idle_timeout_seconds,
                 ssh_connect_timeout_seconds
              FROM app_config WHERE id = 1",
@@ -372,7 +371,6 @@ fn load_or_init_config(conn: &Connection) -> Result<Config> {
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, i64>(4)?,
                     row.get::<_, i64>(5)?,
-                    row.get::<_, i64>(6)?,
                 ))
             },
         )
@@ -384,7 +382,6 @@ fn load_or_init_config(conn: &Connection) -> Result<Config> {
         telemetry_uuid,
         last_telemetry_report_at_unix_ms,
         db_encryption,
-        show_debug_panel,
         ssh_idle_timeout_seconds,
         ssh_connect_timeout_seconds,
     )) = maybe_config
@@ -398,7 +395,6 @@ fn load_or_init_config(conn: &Connection) -> Result<Config> {
                 .as_deref()
                 .map(parse_db_encryption)
                 .transpose()?,
-            show_debug_panel: show_debug_panel != 0,
             ssh_idle_timeout_seconds: ssh_idle_timeout_seconds.max(1) as u64,
             ssh_connect_timeout_seconds: ssh_connect_timeout_seconds.max(1) as u64,
         };
@@ -559,16 +555,14 @@ fn save_config(conn: &Connection, config: &Config) -> Result<()> {
             telemetry_uuid,
             last_telemetry_report_at_unix_ms,
             db_encryption,
-            show_debug_panel,
             ssh_idle_timeout_seconds,
             ssh_connect_timeout_seconds
-        ) VALUES(1, ?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        ) VALUES(1, ?1, ?2, ?3, ?4, ?5, ?6)
         ON CONFLICT(id) DO UPDATE SET
             enable_telemetry = excluded.enable_telemetry,
             telemetry_uuid = excluded.telemetry_uuid,
             last_telemetry_report_at_unix_ms = excluded.last_telemetry_report_at_unix_ms,
             db_encryption = excluded.db_encryption,
-            show_debug_panel = excluded.show_debug_panel,
             ssh_idle_timeout_seconds = excluded.ssh_idle_timeout_seconds,
             ssh_connect_timeout_seconds = excluded.ssh_connect_timeout_seconds",
         params![
@@ -578,11 +572,6 @@ fn save_config(conn: &Connection, config: &Config) -> Result<()> {
             config.telemetry_uuid.as_deref(),
             config.last_telemetry_report_at_unix_ms.map(|v| v as i64),
             config.db_encryption.as_ref().map(db_encryption_to_str),
-            if config.show_debug_panel {
-                1_i64
-            } else {
-                0_i64
-            },
             config.ssh_idle_timeout_seconds as i64,
             config.ssh_connect_timeout_seconds as i64,
         ],

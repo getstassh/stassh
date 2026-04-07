@@ -27,7 +27,6 @@ const CONNECT_TIMEOUT_MAX: u64 = 60;
 #[derive(Clone, Copy)]
 enum SettingsRow {
     Telemetry,
-    DebugPanel,
     IdleTimeout,
     ConnectTimeout,
     EnableEncryption,
@@ -181,15 +180,6 @@ fn render_row_label(row: SettingsRow, app: &AppState, selected: bool) -> Line<'s
             },
             false,
         ),
-        SettingsRow::DebugPanel => (
-            "Debug panel",
-            if app.config.show_debug_panel {
-                "ON".to_string()
-            } else {
-                "OFF".to_string()
-            },
-            false,
-        ),
         SettingsRow::IdleTimeout => (
             "SSH idle timeout",
             format!("{}s", app.config.ssh_idle_timeout_seconds),
@@ -231,7 +221,6 @@ fn render_row_label(row: SettingsRow, app: &AppState, selected: bool) -> Line<'s
 fn build_rows(app: &AppState) -> Vec<SettingsRow> {
     let mut rows = vec![
         SettingsRow::Telemetry,
-        SettingsRow::DebugPanel,
         SettingsRow::IdleTimeout,
         SettingsRow::ConnectTimeout,
     ];
@@ -255,14 +244,6 @@ fn apply_row_change(row: SettingsRow, positive: bool) -> Option<AppEffect> {
                 app.config.enable_telemetry = Some(!enabled);
             } else {
                 app.config.enable_telemetry = Some(false);
-            }
-            let _ = app.save_config();
-        })),
-        SettingsRow::DebugPanel => Some(Box::new(move |app| {
-            if positive {
-                app.config.show_debug_panel = !app.config.show_debug_panel;
-            } else {
-                app.config.show_debug_panel = false;
             }
             let _ = app.save_config();
         })),

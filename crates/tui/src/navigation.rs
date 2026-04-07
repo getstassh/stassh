@@ -107,7 +107,6 @@ impl SshSessionPhase {
 pub(crate) enum DashboardPage {
     Home,
     Settings,
-    Debug,
     Ssh,
 }
 
@@ -117,15 +116,12 @@ pub(crate) struct DashboardState {
     pub(crate) host_modal: Option<HostModalState>,
     pub(crate) quick_switcher: Option<QuickSwitcherState>,
     pub(crate) last_status: Option<String>,
-    pub(crate) debug_scroll: u16,
     pub(crate) host_statuses: HashMap<u32, Vec<HostConnectionStatus>>,
     pub(crate) probe_tasks: Vec<HostProbeTask>,
     pub(crate) last_probe_at: Instant,
     pub(crate) needs_initial_probe: bool,
     pub(crate) ssh_tabs: Vec<SshSessionState>,
     pub(crate) active_ssh_tab: Option<usize>,
-    pub(crate) debug_hold_started_at: Option<Instant>,
-    pub(crate) debug_hold_last_seen_at: Option<Instant>,
     pub(crate) settings_selected_row: usize,
     pub(crate) settings_modal: Option<SettingsSecurityModalState>,
 }
@@ -228,15 +224,12 @@ impl DashboardState {
             host_modal: None,
             quick_switcher: None,
             last_status: None,
-            debug_scroll: 0,
             host_statuses: HashMap::new(),
             probe_tasks: Vec::new(),
             last_probe_at: Instant::now(),
             needs_initial_probe: true,
             ssh_tabs: Vec::new(),
             active_ssh_tab: None,
-            debug_hold_started_at: None,
-            debug_hold_last_seen_at: None,
             settings_selected_row: 0,
             settings_modal: None,
         }

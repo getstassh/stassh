@@ -233,25 +233,6 @@ impl App {
     pub(crate) fn has_modal_open(&self) -> bool {
         matches!(&self.screen, Screen::Dashboard { state } if state.host_modal.is_some() || state.quick_switcher.is_some() || state.settings_modal.is_some())
     }
-
-    pub(crate) fn toggle_debug_panel(&mut self) {
-        self.config.show_debug_panel = !self.config.show_debug_panel;
-        let debug_enabled = self.config.show_debug_panel;
-
-        if let Screen::Dashboard { state } = &mut self.screen {
-            if !debug_enabled && state.active_page == DashboardPage::Debug {
-                state.active_page = DashboardPage::Home;
-            }
-
-            state.last_status = Some(if debug_enabled {
-                "Debug panel enabled".to_string()
-            } else {
-                "Debug panel disabled".to_string()
-            });
-        }
-
-        let _ = self.save_config();
-    }
 }
 
 fn now_unix_ms() -> u64 {

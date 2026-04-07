@@ -3,7 +3,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use rusqlite::{Connection, params};
 
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../sql/001_init.sql"))];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../sql/001_init.sql")),
+    (2, include_str!("../sql/002_deleted_show_debug_panel.sql")),
+];
 
 pub(crate) fn apply(conn: &Connection) -> Result<()> {
     conn.execute_batch(
