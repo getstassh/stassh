@@ -11,7 +11,7 @@ use base64::Engine;
 use russh::{
     ChannelMsg,
     client::{self, AuthResult},
-    keys::{PrivateKeyWithHashAlg, load_secret_key, ssh_key::HashAlg},
+    keys::{PrivateKeyWithHashAlg, decode_secret_key, load_secret_key, ssh_key::HashAlg},
 };
 use tokio::sync::mpsc as tokio_mpsc;
 
@@ -349,14 +349,8 @@ async fn connect_and_run(
                     .context("public key authentication failed")?
             }
             HostAuth::KeyInline { private_key } => {
-                let temp_path = std::env::temp_dir()
-                    .join(format!("stassh-inline-key-{}.pem", uuid::Uuid::new_v4()));
-                std::fs::write(&temp_path, private_key).with_context(|| {
-                    format!("failed to write temporary key {}", temp_path.display())
-                })?;
-                let key = load_secret_key(&temp_path, None)
-                    .with_context(|| "failed to parse pasted private key".to_string())?;
-                let _ = std::fs::remove_file(&temp_path);
+                let key = decode_secret_key(private_key, None)
+                    .with_context(|| "failed to parse inline private key".to_string())?;
 
                 let hash_alg = candidate
                     .best_supported_rsa_hash()
