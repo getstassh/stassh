@@ -88,6 +88,54 @@ pub(crate) struct DashboardState {
     pub(crate) active_ssh_tab: Option<usize>,
     pub(crate) debug_hold_started_at: Option<Instant>,
     pub(crate) debug_hold_last_seen_at: Option<Instant>,
+    pub(crate) settings_selected_row: usize,
+    pub(crate) settings_modal: Option<SettingsSecurityModalState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsSecurityAction {
+    EnableEncryption,
+    ChangePassphrase,
+    RemovePassphrase,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsSecurityField {
+    Current,
+    New,
+    Confirm,
+    DangerConfirm,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SettingsSecurityModalState {
+    pub(crate) action: SettingsSecurityAction,
+    pub(crate) focus: SettingsSecurityField,
+    pub(crate) current_passphrase: StringState,
+    pub(crate) new_passphrase: StringState,
+    pub(crate) confirm_passphrase: StringState,
+    pub(crate) danger_confirm: YesNoState,
+    pub(crate) error: Option<String>,
+}
+
+impl SettingsSecurityModalState {
+    pub(crate) fn for_action(action: SettingsSecurityAction) -> Self {
+        let focus = match action {
+            SettingsSecurityAction::EnableEncryption => SettingsSecurityField::New,
+            SettingsSecurityAction::ChangePassphrase => SettingsSecurityField::Current,
+            SettingsSecurityAction::RemovePassphrase => SettingsSecurityField::Current,
+        };
+
+        Self {
+            action,
+            focus,
+            current_passphrase: StringState::invisible(),
+            new_passphrase: StringState::invisible(),
+            confirm_passphrase: StringState::invisible(),
+            danger_confirm: YesNoState { selected: false },
+            error: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,6 +199,8 @@ impl DashboardState {
             active_ssh_tab: None,
             debug_hold_started_at: None,
             debug_hold_last_seen_at: None,
+            settings_selected_row: 0,
+            settings_modal: None,
         }
     }
 }

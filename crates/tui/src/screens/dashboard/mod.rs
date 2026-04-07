@@ -84,7 +84,7 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
             }
         }
         DashboardPage::Ssh => pages::ssh::handle_key(key, state),
-        DashboardPage::Settings => None,
+        DashboardPage::Settings => pages::settings::handle_key(app, key, state),
     }
 }
 
@@ -142,6 +142,8 @@ fn handle_paste(_app: &AppState, text: &str, state: &mut DashboardState) -> Opti
 
     if state.active_page == DashboardPage::Ssh {
         pages::ssh::handle_paste(text, state);
+    } else if state.active_page == DashboardPage::Settings {
+        pages::settings::handle_paste(text, state);
     }
 
     None
@@ -800,7 +802,7 @@ fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
 
     match state.active_page {
         DashboardPage::Home => pages::home::render(frame, content_area, app, state),
-        DashboardPage::Settings => pages::settings::render(frame, content_area, app),
+        DashboardPage::Settings => pages::settings::render(frame, content_area, app, state),
         DashboardPage::Debug => {
             if app.config.show_debug_panel {
                 pages::debug::render(frame, content_area, app, state)
@@ -1118,7 +1120,7 @@ fn keybind_hint(state: &DashboardState, app: &AppState, area: Rect) -> &'static 
 
     match state.active_page {
         DashboardPage::Home => pages::home::footer_hint(),
-        DashboardPage::Settings => "Ctrl+Q quick switch | Esc exit",
+        DashboardPage::Settings => pages::settings::footer_hint(state),
         DashboardPage::Debug => pages::debug::footer_hint(pages::debug::has_scrollbar(app, area)),
         DashboardPage::Ssh => pages::ssh::footer_hint(),
     }

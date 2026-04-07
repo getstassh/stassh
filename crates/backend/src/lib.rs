@@ -14,7 +14,7 @@ pub use crate::update::{
 };
 pub use crate::version::{VersionCheckStatus, check_for_updates};
 
-use crate::db::{load_state, save_config_only, save_state};
+use crate::db::{load_state, rekey_database, save_config_only, save_state};
 
 use anyhow::Result;
 
@@ -77,6 +77,31 @@ impl AppState {
 
     pub fn db_open_status(&self) -> DbOpenStatus {
         db::db_open_status().unwrap_or(DbOpenStatus::Missing)
+    }
+
+    pub fn enable_encryption_with_passphrase(&mut self, new_passphrase: &str) -> Result<()> {
+        rekey_database(None, Some(new_passphrase))?;
+        self.password = Some(new_passphrase.to_string());
+        self.config.db_encryption = Some(DbEncryption::Passphrase);
+        self.save_config()
+    }
+
+    pub fn change_db_passphrase(
+        &mut self,
+        current_passphrase: &str,
+        new_passphrase: &str,
+    ) -> Result<()> {
+        rekey_database(Some(current_passphrase), Some(new_passphrase))?;
+        self.password = Some(new_passphrase.to_string());
+        self.config.db_encryption = Some(DbEncryption::Passphrase);
+        self.save_config()
+    }
+
+    pub fn remove_db_passphrase(&mut self, current_passphrase: &str) -> Result<()> {
+        rekey_database(Some(current_passphrase), None)?;
+        self.password = None;
+        self.config.db_encryption = Some(DbEncryption::None);
+        self.save_config()
     }
 
     pub fn delete_data(&mut self) -> Result<()> {

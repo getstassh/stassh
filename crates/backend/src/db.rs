@@ -98,6 +98,7 @@ pub(crate) fn db_open_status() -> Result<DbOpenStatus> {
 
     let conn = Connection::open(&path)
         .with_context(|| format!("failed to open database {}", path.display()))?;
+    configure_sqlcipher_logging(&conn);
     match validate_connection(&conn) {
         Ok(()) => Ok(DbOpenStatus::Plain),
         Err(err) if is_wrong_passphrase_error(&err) => Ok(DbOpenStatus::PassphraseRequired),
@@ -155,6 +156,43 @@ pub(crate) fn save_config_only(
     save_config(&conn, config)
 }
 
+pub(crate) fn rekey_database(
+    current_passphrase: Option<&str>,
+    new_passphrase: Option<&str>,
+) -> Result<()> {
+    if let Some(new_passphrase) = new_passphrase
+        && new_passphrase.trim().is_empty()
+    {
+        anyhow::bail!("new passphrase cannot be empty");
+    }
+
+    if current_passphrase.is_none() && new_passphrase.is_some() {
+        encrypt_plaintext_database(new_passphrase.context("missing new passphrase")?)?;
+        return Ok(());
+    }
+
+    if current_passphrase.is_some() && new_passphrase.is_none() {
+        decrypt_encrypted_database(current_passphrase.context("missing current passphrase")?)?;
+        return Ok(());
+    }
+
+    let conn = open_connection(current_passphrase)?;
+    apply_sqlcipher_rekey(&conn, new_passphrase)?;
+
+    let path = db_path()?;
+    drop(conn);
+
+    let verify_conn = Connection::open(&path)
+        .with_context(|| format!("failed to re-open database {}", path.display()))?;
+    configure_sqlcipher_logging(&verify_conn);
+    if let Some(passphrase) = new_passphrase {
+        apply_sqlcipher_key(&verify_conn, passphrase)?;
+    }
+    validate_connection(&verify_conn)?;
+
+    Ok(())
+}
+
 fn open_connection_for_write(
     encryption: DbEncryption,
     passphrase: Option<&str>,
@@ -172,6 +210,7 @@ fn open_connection(passphrase: Option<&str>) -> Result<Connection> {
     let path = db_path()?;
     let conn = Connection::open(&path)
         .with_context(|| format!("failed to open database {}", path.display()))?;
+    configure_sqlcipher_logging(&conn);
 
     if let Some(passphrase) = passphrase {
         apply_sqlcipher_key(&conn, passphrase)?;
@@ -191,6 +230,125 @@ fn apply_sqlcipher_key(conn: &Connection, passphrase: &str) -> Result<()> {
     let escaped = passphrase.replace('\'', "''");
     conn.execute_batch(&format!("PRAGMA key = '{escaped}';"))
         .map_err(map_sql_error)
+}
+
+fn apply_sqlcipher_rekey(conn: &Connection, passphrase: Option<&str>) -> Result<()> {
+    let escaped = passphrase.unwrap_or_default().replace('\'', "''");
+    conn.execute_batch(&format!("PRAGMA rekey = '{escaped}';"))
+        .map_err(map_sql_error)
+}
+
+fn configure_sqlcipher_logging(conn: &Connection) {
+    let _ = conn.execute_batch("PRAGMA cipher_log = OFF;");
+    let _ = conn.execute_batch("PRAGMA cipher_log_level = 0;");
+}
+
+fn encrypt_plaintext_database(new_passphrase: &str) -> Result<()> {
+    let path = db_path()?;
+    let conn = open_connection(None)?;
+
+    let tmp_path = path.with_extension("sqlite.enc_tmp");
+    if tmp_path.exists() {
+        fs::remove_file(&tmp_path).with_context(|| {
+            format!(
+                "failed to remove existing temporary database {}",
+                tmp_path.display()
+            )
+        })?;
+    }
+
+    let escaped_tmp_path = tmp_path.to_string_lossy().replace('\'', "''");
+    let escaped_passphrase = new_passphrase.replace('\'', "''");
+    conn.execute_batch(&format!(
+        "ATTACH DATABASE '{escaped_tmp_path}' AS encrypted KEY '{escaped_passphrase}';\
+         SELECT sqlcipher_export('encrypted');\
+         DETACH DATABASE encrypted;"
+    ))
+    .map_err(map_sql_error)?;
+
+    drop(conn);
+
+    replace_database_file(&path, &tmp_path)?;
+
+    let verify_conn = Connection::open(&path)
+        .with_context(|| format!("failed to re-open encrypted database {}", path.display()))?;
+    configure_sqlcipher_logging(&verify_conn);
+    apply_sqlcipher_key(&verify_conn, new_passphrase)?;
+    validate_connection(&verify_conn)?;
+
+    Ok(())
+}
+
+fn decrypt_encrypted_database(current_passphrase: &str) -> Result<()> {
+    let path = db_path()?;
+    let conn = open_connection(Some(current_passphrase))?;
+
+    let tmp_path = path.with_extension("sqlite.dec_tmp");
+    if tmp_path.exists() {
+        fs::remove_file(&tmp_path).with_context(|| {
+            format!(
+                "failed to remove existing temporary database {}",
+                tmp_path.display()
+            )
+        })?;
+    }
+
+    let escaped_tmp_path = tmp_path.to_string_lossy().replace('\'', "''");
+    conn.execute_batch(&format!(
+        "ATTACH DATABASE '{escaped_tmp_path}' AS plaintext KEY '';\
+         SELECT sqlcipher_export('plaintext');\
+         DETACH DATABASE plaintext;"
+    ))
+    .map_err(map_sql_error)?;
+
+    drop(conn);
+
+    replace_database_file(&path, &tmp_path)?;
+
+    let verify_conn = Connection::open(&path)
+        .with_context(|| format!("failed to re-open decrypted database {}", path.display()))?;
+    configure_sqlcipher_logging(&verify_conn);
+    validate_connection(&verify_conn)?;
+
+    Ok(())
+}
+
+fn replace_database_file(path: &PathBuf, tmp_path: &PathBuf) -> Result<()> {
+    let backup_path = path.with_extension("sqlite.rekey_backup");
+    if backup_path.exists() {
+        fs::remove_file(&backup_path).with_context(|| {
+            format!(
+                "failed to remove existing backup database {}",
+                backup_path.display()
+            )
+        })?;
+    }
+
+    fs::rename(path, &backup_path).with_context(|| {
+        format!(
+            "failed to move original database {} to backup {}",
+            path.display(),
+            backup_path.display()
+        )
+    })?;
+
+    if let Err(err) = fs::rename(tmp_path, path) {
+        let _ = fs::rename(&backup_path, path);
+        return Err(anyhow::anyhow!(
+            "failed to finalize database replacement {}: {}",
+            path.display(),
+            err
+        ));
+    }
+
+    fs::remove_file(&backup_path).with_context(|| {
+        format!(
+            "failed to remove rekey backup database {}",
+            backup_path.display()
+        )
+    })?;
+
+    Ok(())
 }
 
 fn load_or_init_config(conn: &Connection) -> Result<Config> {
