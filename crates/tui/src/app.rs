@@ -5,7 +5,7 @@ use std::{
 };
 
 use backend::{
-    DbEncryption, UpdateCheckStatus, VersionCheckStatus, check_for_update, start_update_install,
+    DbOpenStatus, UpdateCheckStatus, VersionCheckStatus, check_for_update, start_update_install,
 };
 use uuid::Uuid;
 
@@ -27,22 +27,7 @@ pub(crate) struct App {
 
 impl App {
     pub(crate) fn new() -> Self {
-        let mut backend = backend::AppState::new();
-
-        let _screen = match backend.config.db_encryption.clone() {
-            Some(DbEncryption::None) => {
-                let _ = backend.load_db();
-                Screen::Dashboard {
-                    state: DashboardState::new(),
-                }
-            }
-            Some(DbEncryption::Passphrase) => Screen::AskingPassphrase {
-                state: StringState::invisible(),
-            },
-            None => Screen::OnboardingWantsEncryption {
-                state: YesNoState::new(),
-            },
-        };
+        let backend = backend::AppState::new();
 
         let mut app = Self {
             screen: Screen::StartupUpdateCheck {
@@ -120,17 +105,17 @@ impl App {
     }
 
     fn normal_start_screen(&mut self) -> Screen {
-        match self.backend.config.db_encryption.clone() {
-            Some(DbEncryption::None) => {
+        match self.backend.db_open_status() {
+            DbOpenStatus::Plain => {
                 let _ = self.backend.load_db();
                 Screen::Dashboard {
                     state: DashboardState::new(),
                 }
             }
-            Some(DbEncryption::Passphrase) => Screen::AskingPassphrase {
+            DbOpenStatus::PassphraseRequired => Screen::AskingPassphrase {
                 state: StringState::invisible(),
             },
-            None => Screen::OnboardingWantsEncryption {
+            DbOpenStatus::Missing => Screen::OnboardingWantsEncryption {
                 state: YesNoState::new(),
             },
         }

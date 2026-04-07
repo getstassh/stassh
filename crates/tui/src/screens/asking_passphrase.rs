@@ -34,18 +34,13 @@ fn handle_key(_: &AppState, key: KeyEvent, state: &mut StringState) -> Option<Ap
     if let Some(text) = text {
         let text = text.to_string();
         return Some(Box::new(move |app| {
-            if !app.is_correct_password(&text) {
-                app.screen = Screen::AskingPassphrase {
-                    state: StringState::invisible_with_error("Incorrect passphrase".to_string()),
-                };
-                return;
-            }
             app.password = Some(text);
             let result = app.load_db();
             if let Err(e) = result {
-                app.screen = Screen::OnboardingWantsPassphrase {
+                app.password = None;
+                app.screen = Screen::AskingPassphrase {
                     state: StringState::invisible_with_error(format!(
-                        "Failed to load database with provided passphrase: {e}"
+                        "Failed to unlock database: {e}"
                     )),
                 };
                 return;

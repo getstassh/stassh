@@ -38,9 +38,9 @@ fn handle_key(_: &AppState, key: KeyEvent, state: &mut YesNoState) -> Option<App
                     state: StringState::invisible(),
                 };
             } else {
+                let _ = app.load_db();
                 app.config.db_encryption = Some(backend::DbEncryption::None);
                 let _ = app.save_config();
-                let _ = app.load_db();
                 app.go_to_dashboard();
             }
         }));

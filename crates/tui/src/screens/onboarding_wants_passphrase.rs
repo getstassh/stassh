@@ -34,13 +34,29 @@ fn handle_key(_: &AppState, key: KeyEvent, state: &mut StringState) -> Option<Ap
     if let Some(text) = text {
         let text = text.to_string();
         return Some(Box::new(move |app| {
-            app.config.db_encryption = Some(backend::DbEncryption::Passphrase);
-            let _ = app.save_config();
+            if text.trim().is_empty() {
+                app.screen = Screen::OnboardingWantsPassphrase {
+                    state: StringState::invisible_with_error(
+                        "Passphrase cannot be empty".to_string(),
+                    ),
+                };
+                return;
+            }
+
             app.password = Some(text);
             let result = app.load_db();
             if let Err(e) = result {
-                panic!("Failed to load database with provided passphrase: {e}");
+                app.password = None;
+                app.screen = Screen::OnboardingWantsPassphrase {
+                    state: StringState::invisible_with_error(format!(
+                        "Failed to initialize encrypted database: {e}"
+                    )),
+                };
+                return;
             }
+
+            app.config.db_encryption = Some(backend::DbEncryption::Passphrase);
+            let _ = app.save_config();
 
             app.go_to_dashboard();
         }));

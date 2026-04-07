@@ -1,19 +1,20 @@
 mod config;
 mod db;
-mod db_crypto;
-mod migrations;
+mod sql_migrations;
 mod update;
 mod version;
 
 pub use crate::config::Config;
-pub use crate::db::{Database, DbEncryption, HostAuth, SshEndpoint, SshHost, TrustedHostKey};
+pub use crate::db::{
+    Database, DbEncryption, DbOpenStatus, HostAuth, SshEndpoint, SshHost, TrustedHostKey,
+};
 pub use crate::update::{
     ReleaseAsset, UpdateCheckStatus, UpdateInstallStatus, check_for_updates as check_for_update,
     start_update_install,
 };
 pub use crate::version::{VersionCheckStatus, check_for_updates};
 
-use crate::db::{load_db, save_db};
+use crate::db::{load_state, save_config_only, save_state};
 
 use anyhow::Result;
 
@@ -31,10 +32,9 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        let config = Config::load_config();
         Self {
             app_name: "Stassh".to_string(),
-            config,
+            config: Config::default(),
             db: Database::default(),
             version_status: VersionCheckStatus::Idle,
             password: None,
@@ -46,12 +46,9 @@ impl AppState {
     }
 
     pub fn load_db(&mut self) -> Result<()> {
-        let encryption = self
-            .config
-            .db_encryption
-            .clone()
-            .unwrap_or(DbEncryption::None);
-        self.db = load_db(encryption, self.password.as_deref())?;
+        let (db, config) = load_state(self.password.as_deref())?;
+        self.db = db;
+        self.config = config;
         Ok(())
     }
 
@@ -61,16 +58,25 @@ impl AppState {
             .db_encryption
             .clone()
             .unwrap_or(DbEncryption::None);
-        save_db(&self.db, encryption, self.password.as_deref())?;
+        save_state(&self.db, &self.config, encryption, self.password.as_deref())?;
         Ok(())
     }
 
     pub fn save_config(&self) -> Result<()> {
-        self.config.save_config()
+        let encryption = self
+            .config
+            .db_encryption
+            .clone()
+            .unwrap_or(DbEncryption::None);
+        save_config_only(&self.config, encryption, self.password.as_deref())
     }
 
     pub fn is_correct_password(&self, passphrase: &str) -> bool {
         db::is_correct_password(passphrase).unwrap_or(false)
+    }
+
+    pub fn db_open_status(&self) -> DbOpenStatus {
+        db::db_open_status().unwrap_or(DbOpenStatus::Missing)
     }
 
     pub fn delete_data(&mut self) -> Result<()> {

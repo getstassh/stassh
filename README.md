@@ -37,7 +37,7 @@ Run everything locally with a responsive TUI experience that keeps host manageme
 
 ### Encrypted Local Data
 
-Protect stored data with optional local database encryption using Argon2 and AES-256-GCM for strong at-rest security.
+Protect stored data with optional local database encryption backed by SQLite + SQLCipher.
 
 ### Host Key Fingerprint Checks
 
