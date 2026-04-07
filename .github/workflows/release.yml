@@ -32,6 +32,11 @@ jobs:
       source_ref: ${{ steps.resolve.outputs.source_ref }}
 
     steps:
+      - name: Check out repository metadata
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - name: Resolve tag
         id: resolve
         shell: bash
@@ -44,13 +49,11 @@ jobs:
             source_ref="${{ github.event.inputs.source_ref }}"
 
             if [[ -z "${tag}" ]]; then
-              echo "Missing required workflow_dispatch input: release_tag"
-              exit 1
+              tag="$(git tag --list 'v*' --sort=-v:refname | awk 'NR==1 { print; exit }')"
             fi
 
             if [[ -z "${source_ref}" ]]; then
-              echo "Missing required workflow_dispatch input: source_ref"
-              exit 1
+              source_ref="$(git rev-parse origin/main)"
             fi
           else
             echo "Unsupported event context for release resolution"
