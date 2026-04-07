@@ -5,6 +5,15 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to publish (example: v1.2.3)"
+        required: false
+        type: string
+      source_ref:
+        description: "Git ref/sha to build and release"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -20,21 +29,32 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_tag: ${{ steps.resolve.outputs.release_tag }}
+      source_ref: ${{ steps.resolve.outputs.source_ref }}
 
     steps:
-      - name: Check out repository with tags
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
       - name: Resolve tag
         id: resolve
         shell: bash
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF}" == refs/tags/v* ]]; then
             tag="${GITHUB_REF_NAME}"
+            source_ref="${GITHUB_SHA}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${{ github.event.inputs.release_tag }}"
+            source_ref="${{ github.event.inputs.source_ref }}"
+
+            if [[ -z "${tag}" ]]; then
+              echo "Missing required workflow_dispatch input: release_tag"
+              exit 1
+            fi
+
+            if [[ -z "${source_ref}" ]]; then
+              echo "Missing required workflow_dispatch input: source_ref"
+              exit 1
+            fi
           else
-            tag="$(git tag --list 'v*' --sort=-v:refname | awk 'NR==1 { print; exit }')"
+            echo "Unsupported event context for release resolution"
+            exit 1
           fi
 
           if [[ -z "${tag}" ]]; then
@@ -42,8 +62,21 @@ jobs:
             exit 1
           fi
 
+          if [[ "${tag}" != v* ]]; then
+            echo "Release tag must start with 'v', got: ${tag}"
+            exit 1
+          fi
+
           echo "Using release tag: ${tag}"
+          echo "Using source ref: ${source_ref}"
           echo "release_tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "source_ref=${source_ref}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check out repository at source ref
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.resolve.outputs.source_ref }}
 
       - name: Verify tag version matches Cargo.toml
         shell: bash
@@ -90,7 +123,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.resolve_tag.outputs.release_tag }}
+          ref: ${{ needs.resolve_tag.outputs.source_ref }}
 
       - name: Install Linux cross compiler
         if: matrix.packages
@@ -169,6 +202,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve_tag.outputs.release_tag }}
+          target_commitish: ${{ needs.resolve_tag.outputs.source_ref }}
           files: |
             dist/*.tar.gz
             dist/SHA256SUMS
