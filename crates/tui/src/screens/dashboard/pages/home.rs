@@ -255,14 +255,23 @@ fn form_from_host(host: &SshHost) -> HostFormState {
 }
 
 fn status_letters(statuses: &[HostConnectionStatus]) -> Line<'static> {
+    let single_endpoint = statuses.len() == 1;
     let mut spans = vec![Span::styled("status:   ", muted_text())];
     for s in statuses {
-        let (letter, style) = match s {
-            HostConnectionStatus::Reachable => ("G", success_text()),
-            HostConnectionStatus::Unreachable => ("R", danger_text()),
-            HostConnectionStatus::Unknown => ("?", muted_text()),
+        let (label, style) = match s {
+            HostConnectionStatus::Reachable => (
+                if single_endpoint { "Reachable" } else { "G" },
+                success_text(),
+            ),
+            HostConnectionStatus::Unreachable => (
+                if single_endpoint { "Unreachable" } else { "R" },
+                danger_text(),
+            ),
+            HostConnectionStatus::Unknown => {
+                (if single_endpoint { "Unknown" } else { "?" }, muted_text())
+            }
         };
-        spans.push(Span::styled(letter, style));
+        spans.push(Span::styled(label, style));
         spans.push(Span::styled(" ", muted_text()));
     }
 
