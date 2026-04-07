@@ -7,7 +7,7 @@ use std::{
 };
 
 use backend::{AppState, HostAuth, SshEndpoint, SshHost};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -60,13 +60,20 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
         return handle_modal_key(app, key, state.selected_host, modal);
     }
 
-    if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
-        state.quick_switcher = Some(crate::navigation::QuickSwitcherState::new());
+    if state.quick_switcher.is_some() {
+        return handle_quick_switcher_key(key, state);
+    }
+
+    if key.kind != KeyEventKind::Press && key.kind != KeyEventKind::Repeat {
         return None;
     }
 
-    if state.quick_switcher.is_some() {
-        return handle_quick_switcher_key(key, state);
+    if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        open_quick_switcher(state);
+        if let Some(switcher) = &mut state.quick_switcher {
+            switcher.ctrl_cycle_on_release = true;
+        }
+        return None;
     }
 
     match state.active_page {
@@ -1204,10 +1211,16 @@ fn complete_path_candidates(current_dir: &str, arg: &str) -> Vec<String> {
     results
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum QuickSwitchTarget {
     Page(DashboardPage),
     Session(usize),
+}
+
+impl QuickSwitchTarget {
+    fn is_session(self) -> bool {
+        matches!(self, Self::Session(_))
+    }
 }
 
 struct QuickSwitchItem {
@@ -1269,6 +1282,11 @@ fn filtered_quick_switch_indices(state: &DashboardState, items: &[QuickSwitchIte
 }
 
 fn activate_quick_switch_target(state: &mut DashboardState, target: QuickSwitchTarget) {
+    preview_quick_switch_target(state, target);
+    state.quick_switcher = None;
+}
+
+fn preview_quick_switch_target(state: &mut DashboardState, target: QuickSwitchTarget) {
     match target {
         QuickSwitchTarget::Page(page) => {
             state.active_page = page;
@@ -1280,11 +1298,121 @@ fn activate_quick_switch_target(state: &mut DashboardState, target: QuickSwitchT
             }
         }
     }
+}
 
-    state.quick_switcher = None;
+fn current_quick_switch_target(state: &DashboardState) -> QuickSwitchTarget {
+    match state.active_page {
+        DashboardPage::Home => QuickSwitchTarget::Page(DashboardPage::Home),
+        DashboardPage::Settings => QuickSwitchTarget::Page(DashboardPage::Settings),
+        DashboardPage::Ssh => state
+            .active_ssh_tab
+            .map(QuickSwitchTarget::Session)
+            .unwrap_or(QuickSwitchTarget::Page(DashboardPage::Home)),
+    }
+}
+
+fn open_quick_switcher(state: &mut DashboardState) {
+    let mut switcher = crate::navigation::QuickSwitcherState::new();
+    let items = build_quick_switch_items(state);
+    let target = current_quick_switch_target(state);
+    if let Some(selected_idx) = items.iter().position(|item| item.target == target) {
+        switcher.selected_idx = selected_idx;
+    }
+    state.quick_switcher = Some(switcher);
+}
+
+fn selected_quick_switch_target(state: &DashboardState) -> Option<QuickSwitchTarget> {
+    let items = build_quick_switch_items(state);
+    let filtered_indices = filtered_quick_switch_indices(state, &items);
+    let selected_idx = state
+        .quick_switcher
+        .as_ref()
+        .map(|s| s.selected_idx)
+        .unwrap_or(0)
+        .min(filtered_indices.len().saturating_sub(1));
+
+    filtered_indices
+        .get(selected_idx)
+        .and_then(|item_idx| items.get(*item_idx))
+        .map(|item| item.target)
+}
+
+fn cycle_quick_switcher_selection(state: &mut DashboardState, step: isize, activate: bool) {
+    let items = build_quick_switch_items(state);
+    let filtered_indices = filtered_quick_switch_indices(state, &items);
+    let len = filtered_indices.len();
+    if len == 0 {
+        return;
+    }
+
+    let current = state
+        .quick_switcher
+        .as_ref()
+        .map(|s| s.selected_idx)
+        .unwrap_or(0)
+        .min(len.saturating_sub(1));
+    let delta = step.unsigned_abs() % len;
+    let next = if step < 0 {
+        (current + len - delta) % len
+    } else {
+        (current + delta) % len
+    };
+
+    if let Some(switcher) = &mut state.quick_switcher {
+        switcher.selected_idx = next;
+    }
+
+    if activate
+        && let Some(item_idx) = filtered_indices.get(next)
+        && let Some(item) = items.get(*item_idx)
+    {
+        preview_quick_switch_target(state, item.target);
+    }
+}
+
+fn close_selected_quick_switch_session(state: &mut DashboardState) {
+    let Some(target) = selected_quick_switch_target(state) else {
+        return;
+    };
+    let QuickSwitchTarget::Session(idx) = target else {
+        return;
+    };
+
+    pages::ssh::close_ssh_tab(state, idx, "Connection closed".to_string());
+
+    let items = build_quick_switch_items(state);
+    let filtered_indices = filtered_quick_switch_indices(state, &items);
+    if let Some(switcher) = &mut state.quick_switcher {
+        switcher.selected_idx = switcher
+            .selected_idx
+            .min(filtered_indices.len().saturating_sub(1));
+    }
+
+    if let Some(next_target) = selected_quick_switch_target(state) {
+        preview_quick_switch_target(state, next_target);
+    }
 }
 
 fn handle_quick_switcher_key(key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
+    if key.kind == KeyEventKind::Release {
+        let should_cycle = state
+            .quick_switcher
+            .as_ref()
+            .is_some_and(|switcher| switcher.ctrl_cycle_on_release)
+            && !key.modifiers.contains(KeyModifiers::CONTROL);
+        if should_cycle {
+            if let Some(switcher) = &mut state.quick_switcher {
+                switcher.ctrl_cycle_on_release = false;
+            }
+            cycle_quick_switcher_selection(state, 1, true);
+        }
+        return None;
+    }
+
+    if key.kind != KeyEventKind::Press && key.kind != KeyEventKind::Repeat {
+        return None;
+    }
+
     let items = build_quick_switch_items(state);
 
     let filtered_indices = filtered_quick_switch_indices(state, &items);
@@ -1299,21 +1427,33 @@ fn handle_quick_switcher_key(key: KeyEvent, state: &mut DashboardState) -> Optio
         KeyCode::Esc => {
             state.quick_switcher = None;
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let Some(switcher) = &mut state.quick_switcher {
-                switcher.selected_idx = switcher.selected_idx.saturating_sub(1);
+                switcher.ctrl_cycle_on_release = true;
             }
+            cycle_quick_switcher_selection(state, 1, true);
+        }
+        KeyCode::Char('q')
+            if state
+                .quick_switcher
+                .as_ref()
+                .is_some_and(|switcher| switcher.ctrl_cycle_on_release) =>
+        {
+            cycle_quick_switcher_selection(state, 1, true);
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            cycle_quick_switcher_selection(state, -1, true);
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            if let Some(switcher) = &mut state.quick_switcher {
-                let max = filtered_indices.len().saturating_sub(1);
-                switcher.selected_idx = (switcher.selected_idx + 1).min(max);
-            }
+            cycle_quick_switcher_selection(state, 1, true);
         }
         KeyCode::Backspace => {
             if let Some(switcher) = &mut state.quick_switcher {
                 switcher.query.pop();
                 switcher.selected_idx = 0;
+            }
+            if let Some(target) = selected_quick_switch_target(state) {
+                preview_quick_switch_target(state, target);
             }
         }
         KeyCode::Enter => {
@@ -1321,6 +1461,23 @@ fn handle_quick_switcher_key(key: KeyEvent, state: &mut DashboardState) -> Optio
                 && let Some(item) = items.get(*item_idx)
             {
                 activate_quick_switch_target(state, item.target);
+            }
+        }
+        KeyCode::Char('x')
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) =>
+        {
+            if state.active_page == DashboardPage::Ssh
+                && selected_quick_switch_target(state).is_some_and(|target| target.is_session())
+            {
+                close_selected_quick_switch_session(state);
+            } else if let Some(switcher) = &mut state.quick_switcher {
+                switcher.query.push('x');
+                switcher.selected_idx = 0;
+                if let Some(target) = selected_quick_switch_target(state) {
+                    preview_quick_switch_target(state, target);
+                }
             }
         }
         KeyCode::Char(c)
@@ -1331,6 +1488,9 @@ fn handle_quick_switcher_key(key: KeyEvent, state: &mut DashboardState) -> Optio
             if let Some(switcher) = &mut state.quick_switcher {
                 switcher.query.push(c);
                 switcher.selected_idx = 0;
+            }
+            if let Some(target) = selected_quick_switch_target(state) {
+                preview_quick_switch_target(state, target);
             }
         }
         _ => {}
@@ -1479,7 +1639,11 @@ fn render_quick_switcher_modal(frame: &mut Frame, app_area: Rect, state: &Dashbo
     frame.render_widget(Clear, popup_area);
     let block = modal_block(
         "Quick Switcher",
-        "Type to search | Up/Down select | Enter open | Esc close",
+        if state.active_page == DashboardPage::Ssh {
+            "Ctrl+Q/Up/Down cycle | Type filter | X close tab | Esc close"
+        } else {
+            "Ctrl+Q/Up/Down cycle | Type filter | Esc close"
+        },
     );
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
@@ -1848,7 +2012,10 @@ fn keybind_hint(state: &DashboardState) -> &'static str {
     }
 
     if state.quick_switcher.is_some() {
-        return "Type to filter | Up/Down select | Enter open | Esc close";
+        if state.active_page == DashboardPage::Ssh {
+            return "Ctrl+Q/Up/Down cycle | Type filter | X close tab | Esc close";
+        }
+        return "Ctrl+Q/Up/Down cycle | Type filter | Esc close";
     }
 
     match state.active_page {

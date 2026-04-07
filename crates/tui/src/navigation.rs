@@ -227,6 +227,7 @@ impl DashboardState {
 pub(crate) struct QuickSwitcherState {
     pub(crate) query: String,
     pub(crate) selected_idx: usize,
+    pub(crate) ctrl_cycle_on_release: bool,
 }
 
 impl QuickSwitcherState {
@@ -234,6 +235,7 @@ impl QuickSwitcherState {
         Self {
             query: String::new(),
             selected_idx: 0,
+            ctrl_cycle_on_release: false,
         }
     }
 }

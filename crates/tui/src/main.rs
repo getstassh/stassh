@@ -8,6 +8,7 @@ use crossterm::{
     event::{
         self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
         EnableFocusChange, EnableMouseCapture, Event, KeyCode, KeyEventKind,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -36,7 +37,8 @@ fn main() -> Result<()> {
         EnterAlternateScreen,
         EnableBracketedPaste,
         EnableMouseCapture,
-        EnableFocusChange
+        EnableFocusChange,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::REPORT_EVENT_TYPES)
     )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -51,6 +53,7 @@ fn main() -> Result<()> {
         DisableBracketedPaste,
         DisableMouseCapture,
         DisableFocusChange,
+        PopKeyboardEnhancementFlags,
         LeaveAlternateScreen
     )?;
     terminal.show_cursor()?;
@@ -95,7 +98,12 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
         if event::poll(key_rate)? {
             match event::read()? {
                 Event::Key(key) => {
-                    if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat {
+                    let is_press_or_repeat =
+                        key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat;
+                    let is_quick_switch_release =
+                        key.kind == KeyEventKind::Release && app.is_quick_switcher_open();
+
+                    if is_press_or_repeat || is_quick_switch_release {
                         if key.code == KeyCode::Esc && !app.is_ssh_screen() && !app.has_modal_open()
                         {
                             return Ok(());

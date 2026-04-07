@@ -1,17 +1,17 @@
 use backend::AppState;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout},
     widgets::Paragraph,
-    Frame,
 };
 
 use crate::{
     inputs::{handle_pasted_text, handle_text_input},
     navigation::{OnboardingPassphraseField, OnboardingPassphraseState, Screen, StringState},
     screens::{
-        components::{page_with_logo, paragraph_with_note, LogoType},
         AppEffect, ScreenHandler,
+        components::{LogoType, page_with_logo, paragraph_with_note},
     },
     ui::{accent_text, centered_rect, danger_text, line_with_caret, muted_text, text},
 };

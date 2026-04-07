@@ -273,12 +273,18 @@ pub(crate) fn render(frame: &mut Frame, app_area: Rect, area: Rect, state: &Dash
 }
 
 pub(crate) fn footer_hint() -> &'static str {
-    "SSH: type to send input | Esc disconnect active | Ctrl+Q quick switch"
+    "SSH: type input | Esc disconnect active | Ctrl+Q quick switch"
 }
 
-fn close_ssh_tab(state: &mut DashboardState, idx: usize, status: String) {
+pub(crate) fn close_ssh_tab(state: &mut DashboardState, idx: usize, status: String) {
     if idx >= state.ssh_tabs.len() {
         return;
+    }
+
+    if let Some(tab) = state.ssh_tabs.get_mut(idx)
+        && let SshSessionPhase::Running { live } = &mut tab.phase
+    {
+        live.stop();
     }
 
     state.ssh_tabs.remove(idx);
