@@ -69,14 +69,14 @@ pub(crate) fn full_rect<'a>(
 pub(crate) fn shell_block<'a>(title_top: &'a str, title_bottom: &'a str) -> Block<'a> {
     Block::default()
         .title(Line::from(vec![
-            Span::styled("  ", muted_text()),
+            Span::styled(" ", muted_text()),
             Span::styled(title_top.trim(), accent_text()),
-            Span::styled("  ", muted_text()),
+            Span::styled(" ", muted_text()),
         ]))
         .title_bottom(Line::from(vec![
-            Span::styled("  ", muted_text()),
+            Span::styled(" ", muted_text()),
             Span::styled(title_bottom.trim(), soft_accent_text()),
-            Span::styled("  ", muted_text()),
+            Span::styled(" ", muted_text()),
         ]))
         .borders(Borders::ALL)
         .border_type(BorderType::Double)

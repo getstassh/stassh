@@ -155,7 +155,7 @@ pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &Dash
 }
 
 pub(crate) fn footer_hint() -> &'static str {
-    "HOME: arrows or hjkl move | A add | E edit | Enter connect | Ctrl+Q quick switch | Esc exit"
+    "Arrows or hjkl move | A add | E edit | Enter connect | Ctrl+Q quick switch | Esc exit"
 }
 
 fn render_host_card(

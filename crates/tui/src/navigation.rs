@@ -6,10 +6,48 @@ pub(crate) enum Screen {
     StartupUpdateCheck { state: StartupUpdateState },
     StartupUpdatePrompt { state: StartupUpdateState },
     OnboardingWantsEncryption { state: YesNoState },
-    OnboardingWantsPassphrase { state: StringState },
+    OnboardingWantsPassphrase { state: OnboardingPassphraseState },
     OnboardingWantsTelemetry { state: YesNoState },
     AskingPassphrase { state: StringState },
     Dashboard { state: DashboardState },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OnboardingPassphraseField {
+    Passphrase,
+    Confirm,
+}
+
+impl OnboardingPassphraseField {
+    pub(crate) fn next(self) -> Self {
+        match self {
+            Self::Passphrase => Self::Confirm,
+            Self::Confirm => Self::Passphrase,
+        }
+    }
+
+    pub(crate) fn prev(self) -> Self {
+        self.next()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OnboardingPassphraseState {
+    pub(crate) focus: OnboardingPassphraseField,
+    pub(crate) passphrase: StringState,
+    pub(crate) confirm_passphrase: StringState,
+    pub(crate) error: Option<String>,
+}
+
+impl OnboardingPassphraseState {
+    pub(crate) fn new() -> Self {
+        Self {
+            focus: OnboardingPassphraseField::Passphrase,
+            passphrase: StringState::invisible(),
+            confirm_passphrase: StringState::invisible(),
+            error: None,
+        }
+    }
 }
 
 pub(crate) struct SshSessionState {

@@ -4,7 +4,7 @@ use ratatui::{Frame, layout::Alignment, widgets::Paragraph};
 
 use crate::{
     inputs::handle_yes_no_input,
-    navigation::{Screen, StringState, YesNoState},
+    navigation::{OnboardingPassphraseState, Screen, YesNoState},
     screens::{
         AppEffect, ScreenHandler,
         components::{LogoType, page_with_logo, paragraph_with_note},
@@ -35,7 +35,7 @@ fn handle_key(_: &AppState, key: KeyEvent, state: &mut YesNoState) -> Option<App
         return Some(Box::new(move |app| {
             if result {
                 app.screen = Screen::OnboardingWantsPassphrase {
-                    state: StringState::invisible(),
+                    state: OnboardingPassphraseState::new(),
                 };
             } else {
                 let _ = app.load_db();

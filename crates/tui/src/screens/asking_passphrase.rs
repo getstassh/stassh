@@ -70,7 +70,7 @@ fn ui(frame: &mut Frame, _app: &AppState, state: &StringState) {
         frame,
         frame.area(),
         LogoType::WithCredits,
-        "Stassh",
+        "Encrypted Stassh",
         "Type passphrase | Enter confirm",
     );
 

@@ -1411,7 +1411,13 @@ fn handle_quick_switcher_key(
 fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
     let a = frame.area();
     let footer = keybind_hint(state, app, a);
-    let (inner, area) = full_rect(a, "Stassh", footer);
+    let header_title = match state.active_page {
+        DashboardPage::Home => "Stassh Dashboard",
+        DashboardPage::Settings => "Stassh Settings",
+        DashboardPage::Debug => "Stassh Debug",
+        DashboardPage::Ssh => "Stassh SSH Session",
+    };
+    let (inner, area) = full_rect(a, header_title, footer);
     frame.render_widget(inner, a);
     let content_block = frame_block();
     let content_area = content_block.inner(area);

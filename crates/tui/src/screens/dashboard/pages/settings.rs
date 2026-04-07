@@ -95,24 +95,11 @@ pub(crate) fn handle_paste(text: &str, state: &mut DashboardState) {
 pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &DashboardState) {
     let split = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(11),
-            Constraint::Min(6),
-        ])
+        .constraints([Constraint::Length(11), Constraint::Min(6)])
         .split(area);
 
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("Settings", accent_text()),
-            Span::styled("  •  Use arrows/hjkl to navigate", muted_text()),
-        ]))
-        .style(text()),
-        split[0],
-    );
-
-    render_controls_panel(frame, split[1], app, state);
-    render_info_panel(frame, split[2], app);
+    render_controls_panel(frame, split[0], app, state);
+    render_info_panel(frame, split[1], app);
 
     if let Some(modal) = &state.settings_modal {
         render_security_modal(frame, frame.area(), modal);
@@ -121,10 +108,10 @@ pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &Dash
 
 pub(crate) fn footer_hint(state: &DashboardState) -> &'static str {
     if state.settings_modal.is_some() {
-        return "SETTINGS modal: Tab move | Enter submit/next | Left/Right confirm | Esc cancel";
+        return "Tab move | Enter submit/next | Left/Right confirm | Esc cancel";
     }
 
-    "SETTINGS: Up/Down select | Left/Right edit | Enter action | Ctrl+Q quick switch | Esc exit"
+    "Up/Down/j/k select | Left/Right/h/l edit | Enter action | Ctrl+Q quick switch | Esc exit"
 }
 
 fn render_controls_panel(frame: &mut Frame, area: Rect, app: &AppState, state: &DashboardState) {
