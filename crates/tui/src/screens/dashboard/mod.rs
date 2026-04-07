@@ -617,21 +617,24 @@ fn parse_endpoints(value: &str) -> Result<Vec<SshEndpoint>, String> {
             continue;
         }
 
-        let Some((host, port)) = trimmed.rsplit_once(':') else {
-            return Err(format!("Endpoint '{trimmed}' must be host:port"));
+        let (host, port) = match trimmed.rsplit_once(':') {
+            Some((host, "")) => (host, 22),
+            Some((host, port)) => {
+                let port = port
+                    .trim()
+                    .parse::<u16>()
+                    .map_err(|_| format!("Endpoint '{trimmed}' has invalid port"))?;
+                if port == 0 {
+                    return Err(format!("Endpoint '{trimmed}' has invalid port"));
+                }
+                (host, port)
+            }
+            None => (trimmed, 22),
         };
 
         let host = host.trim();
         if host.is_empty() {
             return Err(format!("Endpoint '{trimmed}' has an empty host"));
-        }
-
-        let port = port
-            .trim()
-            .parse::<u16>()
-            .map_err(|_| format!("Endpoint '{trimmed}' has invalid port"))?;
-        if port == 0 {
-            return Err(format!("Endpoint '{trimmed}' has invalid port"));
         }
 
         endpoints.push(SshEndpoint {
@@ -1750,7 +1753,7 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
     render_input_field(
         frame,
         chunks[2],
-        "Endpoints (host:port, one per line)",
+        "Endpoints (host[:port], comma/new line, default 22)",
         &modal.form.endpoints,
         modal.form.focus == HostFormField::Endpoints,
         modal.form.caret,
@@ -2022,5 +2025,38 @@ fn keybind_hint(state: &DashboardState) -> &'static str {
         DashboardPage::Home => pages::home::footer_hint(),
         DashboardPage::Settings => pages::settings::footer_hint(state),
         DashboardPage::Ssh => pages::ssh::footer_hint(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_endpoints;
+
+    #[test]
+    fn parse_endpoints_defaults_missing_ports_to_22() {
+        let endpoints = parse_endpoints("host-a, host-b\nhost-c").unwrap();
+        assert_eq!(endpoints.len(), 3);
+        assert_eq!(endpoints[0].host, "host-a");
+        assert_eq!(endpoints[0].port, 22);
+        assert_eq!(endpoints[1].host, "host-b");
+        assert_eq!(endpoints[1].port, 22);
+        assert_eq!(endpoints[2].host, "host-c");
+        assert_eq!(endpoints[2].port, 22);
+    }
+
+    #[test]
+    fn parse_endpoints_supports_mixed_explicit_and_default_ports() {
+        let endpoints = parse_endpoints("host-a:2200, host-b").unwrap();
+        assert_eq!(endpoints.len(), 2);
+        assert_eq!(endpoints[0].host, "host-a");
+        assert_eq!(endpoints[0].port, 2200);
+        assert_eq!(endpoints[1].host, "host-b");
+        assert_eq!(endpoints[1].port, 22);
+    }
+
+    #[test]
+    fn parse_endpoints_rejects_invalid_ports() {
+        let err = parse_endpoints("host-a:abc").unwrap_err();
+        assert!(err.contains("invalid port"));
     }
 }

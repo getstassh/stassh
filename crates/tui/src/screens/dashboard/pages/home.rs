@@ -235,7 +235,8 @@ fn form_from_host(host: &SshHost) -> HostFormState {
         .endpoints
         .iter()
         .map(|e| format!("{}:{}", e.host, e.port))
-        .collect();
+        .collect::<Vec<_>>()
+        .join(", ");
     match &host.auth {
         KeyPath { key_path } => {
             form.auth_mode = crate::navigation::HostAuthMode::Key;
