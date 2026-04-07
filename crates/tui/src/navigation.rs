@@ -3,7 +3,6 @@ use std::{collections::HashMap, thread::JoinHandle, time::Instant};
 use crate::ssh_client::{LiveSshSession, PendingSshStart, TrustChallenge};
 
 pub(crate) enum Screen {
-    StartupUpdateCheck { state: StartupUpdateState },
     StartupUpdatePrompt { state: StartupUpdateState },
     OnboardingWantsEncryption { state: YesNoState },
     OnboardingWantsPassphrase { state: OnboardingPassphraseState },
@@ -124,6 +123,17 @@ pub(crate) struct DashboardState {
     pub(crate) active_ssh_tab: Option<usize>,
     pub(crate) settings_selected_row: usize,
     pub(crate) settings_modal: Option<SettingsSecurityModalState>,
+    pub(crate) update_prompt: Option<DashboardUpdatePromptState>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DashboardUpdatePromptState {
+    pub(crate) current_version: String,
+    pub(crate) latest_version: String,
+    pub(crate) release_url: String,
+    pub(crate) asset: backend::ReleaseAsset,
+    pub(crate) checksum_asset: Option<backend::ReleaseAsset>,
+    pub(crate) choice: YesNoState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,8 +184,6 @@ impl SettingsSecurityModalState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum StartupUpdatePhase {
-    Checking,
-    Prompt,
     Downloading,
     Verifying,
     Installing,
@@ -186,34 +194,11 @@ pub(crate) enum StartupUpdatePhase {
 #[derive(Debug)]
 pub(crate) struct StartupUpdateState {
     pub(crate) phase: StartupUpdatePhase,
-    pub(crate) current_version: String,
-    pub(crate) latest_version: Option<String>,
-    pub(crate) release_url: Option<String>,
-    pub(crate) asset: Option<backend::ReleaseAsset>,
-    pub(crate) checksum_asset: Option<backend::ReleaseAsset>,
     pub(crate) message: Option<String>,
     pub(crate) spinner_frame: usize,
     pub(crate) downloaded: u64,
     pub(crate) total: Option<u64>,
     pub(crate) install_receiver: Option<std::sync::mpsc::Receiver<backend::UpdateInstallStatus>>,
-}
-
-impl StartupUpdateState {
-    pub(crate) fn new(current_version: String) -> Self {
-        Self {
-            phase: StartupUpdatePhase::Checking,
-            current_version,
-            latest_version: None,
-            release_url: None,
-            asset: None,
-            checksum_asset: None,
-            message: None,
-            spinner_frame: 0,
-            downloaded: 0,
-            total: None,
-            install_receiver: None,
-        }
-    }
 }
 
 impl DashboardState {
@@ -232,6 +217,7 @@ impl DashboardState {
             active_ssh_tab: None,
             settings_selected_row: 0,
             settings_modal: None,
+            update_prompt: None,
         }
     }
 }
@@ -334,7 +320,7 @@ impl HostFormState {
             name: String::new(),
             user: String::new(),
             endpoints: String::new(),
-            auth_mode: HostAuthMode::Key,
+            auth_mode: HostAuthMode::Password,
             key_input_mode: HostKeyInputMode::Path,
             key_path: String::new(),
             key_inline: String::new(),

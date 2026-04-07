@@ -17,14 +17,15 @@ use ratatui::{
 };
 
 use crate::{
+    inputs::handle_yes_no_input,
     navigation::{
-        DashboardPage, DashboardState, HostAuthMode, HostConnectionStatus, HostFormField,
-        HostFormState, HostKeyInputMode, HostKeyPickerEntry, HostKeyPickerState, HostModalMode,
-        HostModalState, HostProbeTask, Screen,
+        DashboardPage, DashboardState, DashboardUpdatePromptState, HostAuthMode,
+        HostConnectionStatus, HostFormField, HostFormState, HostKeyInputMode, HostKeyPickerEntry,
+        HostKeyPickerState, HostModalMode, HostModalState, HostProbeTask, Screen,
     },
     screens::{AppEffect, ScreenHandler},
     ui::{
-        accent_text, border, centered_rect_no_border, danger_text, frame_block, full_rect,
+        accent_text, border, button, centered_rect_no_border, danger_text, frame_block, full_rect,
         modal_block, muted_text, selected_border, text,
     },
 };
@@ -51,6 +52,10 @@ pub(crate) static HANDLER: ScreenHandler<DashboardState> = ScreenHandler {
 };
 
 fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
+    if state.update_prompt.is_some() {
+        return handle_update_prompt_key(key, state);
+    }
+
     if let Some(modal) = &mut state.host_modal {
         return handle_modal_key(app, key, state.selected_host, modal);
     }
@@ -1334,6 +1339,28 @@ fn handle_quick_switcher_key(key: KeyEvent, state: &mut DashboardState) -> Optio
     None
 }
 
+fn handle_update_prompt_key(key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
+    if let Some(prompt) = &mut state.update_prompt {
+        if key.code == KeyCode::Esc {
+            state.update_prompt = None;
+            return None;
+        }
+
+        if let Some(install_now) = handle_yes_no_input(&mut prompt.choice, key.code) {
+            if install_now {
+                return Some(Box::new(|app| {
+                    app.start_update_install_from_dashboard_prompt();
+                }));
+            }
+
+            state.update_prompt = None;
+            return None;
+        }
+    }
+
+    None
+}
+
 fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
     let a = frame.area();
     let footer = keybind_hint(state);
@@ -1361,6 +1388,73 @@ fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
     if state.quick_switcher.is_some() {
         render_quick_switcher_modal(frame, a, state);
     }
+
+    if let Some(update_prompt) = &state.update_prompt {
+        render_update_prompt_modal(frame, a, update_prompt);
+    }
+}
+
+fn render_update_prompt_modal(
+    frame: &mut Frame,
+    app_area: Rect,
+    update_prompt: &DashboardUpdatePromptState,
+) {
+    let width = (app_area.width.saturating_sub(8)).min(94);
+    let height = 9;
+    let popup_area = centered_rect_no_border(width, height, app_area);
+
+    frame.render_widget(Clear, popup_area);
+    let block = modal_block(
+        "Update available",
+        "<-/-> or Tab switch | Enter confirm | Esc skip this launch",
+    );
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let details = Paragraph::new(format!(
+        "Install {} now?\nCurrent: {}\n",
+        update_prompt.latest_version, update_prompt.current_version
+    ))
+    .alignment(Alignment::Center)
+    .style(text());
+    frame.render_widget(details, chunks[0]);
+
+    let url = Paragraph::new(update_prompt.release_url.clone())
+        .alignment(Alignment::Center)
+        .style(muted_text());
+    frame.render_widget(url, chunks[1]);
+
+    let actions = Paragraph::new(Line::from(vec![
+        Span::styled(
+            button("Install now", update_prompt.choice.is_yes()),
+            if update_prompt.choice.is_yes() {
+                accent_text()
+            } else {
+                muted_text()
+            },
+        ),
+        Span::styled(" ", muted_text()),
+        Span::styled(
+            button("Skip this launch", update_prompt.choice.is_no()),
+            if update_prompt.choice.is_no() {
+                accent_text()
+            } else {
+                muted_text()
+            },
+        ),
+    ]))
+    .alignment(Alignment::Center);
+    frame.render_widget(actions, chunks[3]);
 }
 
 fn render_quick_switcher_modal(frame: &mut Frame, app_area: Rect, state: &DashboardState) {
@@ -1745,12 +1839,16 @@ fn render_key_picker(frame: &mut Frame, host_popup: Rect, picker: &HostKeyPicker
 }
 
 fn keybind_hint(state: &DashboardState) -> &'static str {
+    if state.update_prompt.is_some() {
+        return "";
+    }
+
     if state.host_modal.is_some() {
-        return "HOST form: Tab/Up/Down move | Ctrl+S save | Esc";
+        return "Tab/Up/Down move | Ctrl+S save | Esc";
     }
 
     if state.quick_switcher.is_some() {
-        return "SWITCHER: type to filter | Up/Down select | Enter open | Esc close";
+        return "Type to filter | Up/Down select | Enter open | Esc close";
     }
 
     match state.active_page {

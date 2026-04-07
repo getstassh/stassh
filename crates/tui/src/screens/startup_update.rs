@@ -13,18 +13,13 @@ use crate::{
 };
 
 pub(crate) static HANDLER: ScreenHandler<StartupUpdateState> = ScreenHandler {
-    matches: |s| {
-        matches!(
-            s,
-            Screen::StartupUpdateCheck { .. } | Screen::StartupUpdatePrompt { .. }
-        )
-    },
+    matches: |s| matches!(s, Screen::StartupUpdatePrompt { .. }),
     get: |s| match s {
-        Screen::StartupUpdateCheck { state } | Screen::StartupUpdatePrompt { state } => Some(state),
+        Screen::StartupUpdatePrompt { state } => Some(state),
         _ => None,
     },
     get_mut: |s| match s {
-        Screen::StartupUpdateCheck { state } | Screen::StartupUpdatePrompt { state } => Some(state),
+        Screen::StartupUpdatePrompt { state } => Some(state),
         _ => None,
     },
     render: ui,
@@ -40,11 +35,6 @@ fn handle_key(
     state: &mut StartupUpdateState,
 ) -> Option<AppEffect> {
     match state.phase {
-        StartupUpdatePhase::Prompt => match key.code {
-            KeyCode::Enter => Some(Box::new(|app| app.start_update_install())),
-            KeyCode::Char('s') | KeyCode::Esc => Some(Box::new(|app| app.skip_update_gate())),
-            _ => None,
-        },
         StartupUpdatePhase::Done | StartupUpdatePhase::Failed => match key.code {
             KeyCode::Enter | KeyCode::Esc | KeyCode::Char('s') => {
                 Some(Box::new(|app| app.skip_update_gate()))
@@ -103,8 +93,6 @@ fn ui(frame: &mut Frame, _app: &backend::AppState, state: &StartupUpdateState) {
 
     let spinner = ["-", "\\", "|", "/"][state.spinner_frame % 4];
     let title = match state.phase {
-        StartupUpdatePhase::Checking => format!("{spinner} Checking for updates..."),
-        StartupUpdatePhase::Prompt => "New version found".to_string(),
         StartupUpdatePhase::Downloading => format!("{spinner} Downloading update..."),
         StartupUpdatePhase::Verifying => format!("{spinner} Verifying download..."),
         StartupUpdatePhase::Installing => format!("{spinner} Installing update..."),
@@ -120,25 +108,6 @@ fn ui(frame: &mut Frame, _app: &backend::AppState, state: &StartupUpdateState) {
     );
 
     match state.phase {
-        StartupUpdatePhase::Prompt => {
-            frame.render_widget(
-                Paragraph::new(format!(
-                    "Current: {}\nLatest: {}\n{}",
-                    state.current_version,
-                    state.latest_version.clone().unwrap_or_default(),
-                    state.release_url.clone().unwrap_or_default(),
-                ))
-                .alignment(Alignment::Center)
-                .style(text()),
-                split[1],
-            );
-            frame.render_widget(
-                Paragraph::new("Press Enter to install or S to skip this launch")
-                    .alignment(Alignment::Center)
-                    .style(muted_text()),
-                split[2],
-            );
-        }
         StartupUpdatePhase::Downloading => {
             let ratio = match state.total {
                 Some(total) if total > 0 => {
@@ -198,14 +167,6 @@ fn ui(frame: &mut Frame, _app: &backend::AppState, state: &StartupUpdateState) {
                     .alignment(Alignment::Center)
                     .style(muted_text()),
                 split[2],
-            );
-        }
-        StartupUpdatePhase::Checking => {
-            frame.render_widget(
-                Paragraph::new("Contacting GitHub releases...")
-                    .alignment(Alignment::Center)
-                    .style(text()),
-                split[1],
             );
         }
     }

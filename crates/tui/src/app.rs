@@ -10,7 +10,8 @@ use backend::{
 use uuid::Uuid;
 
 use crate::navigation::{
-    DashboardPage, DashboardState, Screen, StartupUpdateState, StringState, YesNoState,
+    DashboardPage, DashboardState, DashboardUpdatePromptState, Screen, StartupUpdateState,
+    StringState, YesNoState,
 };
 use crate::telemetry;
 
@@ -20,6 +21,7 @@ pub(crate) struct App {
     pub(crate) screen: Screen,
     backend: backend::AppState,
     update_receiver: Option<mpsc::Receiver<UpdateCheckStatus>>,
+    pending_update_prompt: Option<DashboardUpdatePromptState>,
     boot_completed: bool,
     exit_requested: bool,
     restart_requested: bool,
@@ -30,15 +32,19 @@ impl App {
         let backend = backend::AppState::new();
 
         let mut app = Self {
-            screen: Screen::StartupUpdateCheck {
-                state: StartupUpdateState::new(env!("CARGO_PKG_VERSION").to_string()),
+            screen: Screen::OnboardingWantsEncryption {
+                state: YesNoState::new(),
             },
             backend,
             update_receiver: None,
+            pending_update_prompt: None,
             boot_completed: false,
             exit_requested: false,
             restart_requested: false,
         };
+
+        app.boot_completed = true;
+        app.screen = app.normal_start_screen();
 
         app.start_version_check();
 
@@ -65,13 +71,24 @@ impl App {
         self.update_receiver = Some(rx);
     }
 
-    pub(crate) fn start_update_install(&mut self) {
-        if let Screen::StartupUpdatePrompt { state } = &mut self.screen {
-            if let Some(asset) = state.asset.clone() {
-                state.phase = crate::navigation::StartupUpdatePhase::Downloading;
-                state.install_receiver =
-                    Some(start_update_install(asset, state.checksum_asset.clone()));
-            }
+    pub(crate) fn start_update_install_from_dashboard_prompt(&mut self) {
+        if let Screen::Dashboard { state } = &mut self.screen
+            && let Some(prompt) = state.update_prompt.take()
+        {
+            let install_receiver = Some(start_update_install(
+                prompt.asset.clone(),
+                prompt.checksum_asset.clone(),
+            ));
+            self.screen = Screen::StartupUpdatePrompt {
+                state: StartupUpdateState {
+                    phase: crate::navigation::StartupUpdatePhase::Downloading,
+                    message: None,
+                    spinner_frame: 0,
+                    downloaded: 0,
+                    total: None,
+                    install_receiver,
+                },
+            };
         }
     }
 
@@ -98,8 +115,7 @@ impl App {
             return;
         }
 
-        if let Screen::StartupUpdateCheck { .. } | Screen::StartupUpdatePrompt { .. } = self.screen
-        {
+        if let Screen::StartupUpdatePrompt { .. } = self.screen {
             self.screen = self.normal_start_screen();
         }
     }
@@ -108,9 +124,9 @@ impl App {
         match self.backend.db_open_status() {
             DbOpenStatus::Plain => {
                 let _ = self.backend.load_db();
-                Screen::Dashboard {
-                    state: DashboardState::new(),
-                }
+                let mut state = DashboardState::new();
+                state.update_prompt = self.pending_update_prompt.take();
+                Screen::Dashboard { state }
             }
             DbOpenStatus::PassphraseRequired => Screen::AskingPassphrase {
                 state: StringState::invisible(),
@@ -136,9 +152,9 @@ impl App {
             };
             return;
         }
-        self.screen = Screen::Dashboard {
-            state: DashboardState::new(),
-        };
+        let mut state = DashboardState::new();
+        state.update_prompt = self.pending_update_prompt.take();
+        self.screen = Screen::Dashboard { state };
         self.maybe_report_telemetry();
     }
 
@@ -188,34 +204,28 @@ impl App {
                         UpdateCheckStatus::Error(err) => VersionCheckStatus::Error(err.clone()),
                     };
                     self.update_receiver = None;
-                    if matches!(self.screen, Screen::StartupUpdateCheck { .. }) {
-                        self.screen = match status {
-                            UpdateCheckStatus::UpdateAvailable {
-                                current,
-                                latest,
-                                release_url,
-                                asset,
-                                checksum_asset,
-                            } => Screen::StartupUpdatePrompt {
-                                state: StartupUpdateState {
-                                    phase: crate::navigation::StartupUpdatePhase::Prompt,
-                                    current_version: current.to_string(),
-                                    latest_version: Some(latest.to_string()),
-                                    release_url: Some(release_url),
-                                    asset: Some(asset),
-                                    checksum_asset,
-                                    message: None,
-                                    spinner_frame: 0,
-                                    downloaded: 0,
-                                    total: None,
-                                    install_receiver: None,
-                                },
-                            },
-                            _ => {
-                                self.boot_completed = true;
-                                self.normal_start_screen()
-                            }
+                    if let UpdateCheckStatus::UpdateAvailable {
+                        current,
+                        latest,
+                        release_url,
+                        asset,
+                        checksum_asset,
+                    } = status
+                    {
+                        let prompt = DashboardUpdatePromptState {
+                            current_version: current.to_string(),
+                            latest_version: latest.to_string(),
+                            release_url,
+                            asset,
+                            checksum_asset,
+                            choice: YesNoState::new(),
                         };
+
+                        if let Screen::Dashboard { state } = &mut self.screen {
+                            state.update_prompt = Some(prompt);
+                        } else {
+                            self.pending_update_prompt = Some(prompt);
+                        }
                     }
                 }
                 Err(TryRecvError::Empty) => {}
@@ -231,7 +241,7 @@ impl App {
     }
 
     pub(crate) fn has_modal_open(&self) -> bool {
-        matches!(&self.screen, Screen::Dashboard { state } if state.host_modal.is_some() || state.quick_switcher.is_some() || state.settings_modal.is_some())
+        matches!(&self.screen, Screen::Dashboard { state } if state.host_modal.is_some() || state.quick_switcher.is_some() || state.settings_modal.is_some() || state.update_prompt.is_some())
     }
 }
 

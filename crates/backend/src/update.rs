@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc,
     thread,
+    time::Duration,
 };
 
 use anyhow::{Context, Result, anyhow};
@@ -241,7 +242,14 @@ fn replace_current_binary(new_binary: &Path) -> Result<()> {
 }
 
 fn fetch_latest_release() -> Result<LatestRelease> {
-    let mut response = ureq::get(RELEASES_URL)
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(2)))
+        .timeout_global(Some(Duration::from_secs(4)))
+        .build()
+        .into();
+
+    let mut response = agent
+        .get(RELEASES_URL)
         .header("user-agent", "stassh-updater")
         .call()?;
 
