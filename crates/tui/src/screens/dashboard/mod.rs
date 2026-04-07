@@ -1,5 +1,7 @@
 use std::{
+    fs,
     net::{TcpStream, ToSocketAddrs},
+    path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
 };
@@ -17,8 +19,8 @@ use ratatui::{
 use crate::{
     navigation::{
         DashboardPage, DashboardState, HostAuthMode, HostConnectionStatus, HostFormField,
-        HostFormState, HostKeyInputMode, HostKeyPickerState, HostModalMode, HostModalState,
-        HostProbeTask, Screen,
+        HostFormState, HostKeyInputMode, HostKeyPickerEntry, HostKeyPickerState, HostModalMode,
+        HostModalState, HostProbeTask, Screen,
     },
     screens::{AppEffect, ScreenHandler},
     ui::{
@@ -130,6 +132,14 @@ fn is_debug_hold_key(key: KeyEvent) -> bool {
 
 fn handle_paste(_app: &AppState, text: &str, state: &mut DashboardState) -> Option<AppEffect> {
     if let Some(modal) = &mut state.host_modal {
+        if let Some(picker) = &mut modal.key_picker {
+            picker.command_input.push_str(text);
+            picker.history_index = None;
+            reset_picker_completion(picker);
+            picker.error = None;
+            picker.status = None;
+            return None;
+        }
         insert_pasted_text(&mut modal.form, text);
         return None;
     }
@@ -254,23 +264,87 @@ fn handle_modal_key(
     modal: &mut HostModalState,
 ) -> Option<AppEffect> {
     if let Some(picker) = &mut modal.key_picker {
+        let form = &mut modal.form;
         match key.code {
             KeyCode::Esc => {
                 modal.key_picker = None;
             }
-            KeyCode::Up | KeyCode::Char('k') => {
-                picker.selected = picker.selected.saturating_sub(1);
+            KeyCode::Up => {
+                if picker.command_input.trim().is_empty() {
+                    picker.selected = picker.selected.saturating_sub(1);
+                    ensure_picker_selection_visible(picker);
+                } else {
+                    picker_history_up(picker);
+                }
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                let max = picker.options.len().saturating_sub(1);
-                picker.selected = (picker.selected + 1).min(max);
+            KeyCode::Down => {
+                if picker.command_input.trim().is_empty() {
+                    let max = picker.entries.len().saturating_sub(1);
+                    picker.selected = (picker.selected + 1).min(max);
+                    ensure_picker_selection_visible(picker);
+                } else {
+                    picker_history_down(picker);
+                }
+            }
+            KeyCode::Backspace => {
+                if !picker.command_input.is_empty() {
+                    picker.command_input.pop();
+                    picker.history_index = None;
+                    reset_picker_completion(picker);
+                    picker.error = None;
+                    picker.status = None;
+                }
+            }
+            KeyCode::Left => {
+                if picker.command_input.trim().is_empty()
+                    && let Some(parent) = parent_dir_str(&picker.current_dir)
+                {
+                    move_picker_to_dir(picker, &parent);
+                }
+            }
+            KeyCode::Right => {
+                if picker.command_input.trim().is_empty()
+                    && let Some(entry) = picker.entries.get(picker.selected)
+                    && entry.is_dir
+                {
+                    let path = entry.path.clone();
+                    move_picker_to_dir(picker, &path);
+                }
+            }
+            KeyCode::Tab => {
+                apply_picker_tab_completion(picker);
+            }
+            KeyCode::Char(c)
+                if !key.modifiers.intersects(
+                    KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                ) =>
+            {
+                picker.command_input.push(c);
+                picker.history_index = None;
+                reset_picker_completion(picker);
+                picker.error = None;
+                picker.status = None;
             }
             KeyCode::Enter => {
-                if let Some(path) = picker.options.get(picker.selected) {
-                    modal.form.key_path = path.clone();
-                    modal.form.caret = modal.form.key_path.len();
+                if !picker.command_input.trim().is_empty() {
+                    if execute_picker_command(form, picker) {
+                        modal.key_picker = None;
+                    }
+                    return None;
                 }
-                modal.key_picker = None;
+
+                if let Some(entry) = picker.entries.get(picker.selected).cloned() {
+                    if entry.is_dir {
+                        move_picker_to_dir(picker, &entry.path);
+                        return None;
+                    }
+
+                    if let Err(err) = apply_picker_file_selection(form, picker, &entry.path) {
+                        form.error = Some(err);
+                        return None;
+                    }
+                    modal.key_picker = None;
+                }
             }
             _ => {}
         }
@@ -301,52 +375,25 @@ fn handle_modal_key(
     }
 
     if modal.form.focus == HostFormField::AuthMode {
-        if key.code == KeyCode::Left
-            || key.code == KeyCode::Right
-            || key.code == KeyCode::Char('h')
-            || key.code == KeyCode::Char('l')
-            || key.code == KeyCode::Enter
-            || key.code == KeyCode::Char(' ')
-        {
-            if key.code == KeyCode::Char(' ') {
-                modal.form.key_input_mode = match modal.form.key_input_mode {
-                    HostKeyInputMode::Path => HostKeyInputMode::Inline,
-                    HostKeyInputMode::Inline => HostKeyInputMode::Path,
-                };
-            } else {
-                modal.form.auth_mode = match modal.form.auth_mode {
-                    HostAuthMode::Key => HostAuthMode::Password,
-                    HostAuthMode::Password => HostAuthMode::Key,
-                };
-            }
+        if key.code == KeyCode::Left || key.code == KeyCode::Right {
+            cycle_auth_mode(&mut modal.form, key.code == KeyCode::Left);
             modal.form.error = None;
             return None;
         }
     }
 
-    if key.code == KeyCode::Char('f')
-        && modal.form.focus == HostFormField::AuthValue
+    if modal.form.focus == HostFormField::AuthValue
         && modal.form.auth_mode == HostAuthMode::Key
         && modal.form.key_input_mode == HostKeyInputMode::Path
+        && (key.code == KeyCode::Enter || key.code == KeyCode::Right)
     {
-        modal.key_picker = Some(HostKeyPickerState {
-            options: discover_key_files(),
-            selected: 0,
-        });
+        modal.form.error = None;
+        modal.key_picker = Some(build_key_picker(&modal.form));
         return None;
     }
 
     if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL) {
         return save_modal(app, selected_host, modal);
-    }
-
-    if key.code == KeyCode::Enter {
-        if modal.form.focus == HostFormField::AuthValue {
-            return save_modal(app, selected_host, modal);
-        }
-        modal.form.focus = modal.form.focus.next();
-        modal.form.caret = current_field_value(&modal.form).len();
-        return None;
     }
 
     edit_form_field(&mut modal.form, key);
@@ -407,6 +454,54 @@ fn save_modal(
     }))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AuthSelection {
+    KeyPath,
+    KeyInline,
+    Password,
+}
+
+fn auth_selection(form: &HostFormState) -> AuthSelection {
+    match (form.auth_mode, form.key_input_mode) {
+        (HostAuthMode::Password, _) => AuthSelection::Password,
+        (HostAuthMode::Key, HostKeyInputMode::Path) => AuthSelection::KeyPath,
+        (HostAuthMode::Key, HostKeyInputMode::Inline) => AuthSelection::KeyInline,
+    }
+}
+
+fn set_auth_selection(form: &mut HostFormState, selection: AuthSelection) {
+    match selection {
+        AuthSelection::KeyPath => {
+            form.auth_mode = HostAuthMode::Key;
+            form.key_input_mode = HostKeyInputMode::Path;
+        }
+        AuthSelection::KeyInline => {
+            form.auth_mode = HostAuthMode::Key;
+            form.key_input_mode = HostKeyInputMode::Inline;
+        }
+        AuthSelection::Password => {
+            form.auth_mode = HostAuthMode::Password;
+        }
+    }
+}
+
+fn cycle_auth_mode(form: &mut HostFormState, reverse: bool) {
+    let modes = [
+        AuthSelection::KeyPath,
+        AuthSelection::KeyInline,
+        AuthSelection::Password,
+    ];
+    let current = auth_selection(form);
+    let current_idx = modes.iter().position(|m| *m == current).unwrap_or(0);
+
+    let next_idx = if reverse {
+        current_idx.checked_sub(1).unwrap_or(modes.len() - 1)
+    } else {
+        (current_idx + 1) % modes.len()
+    };
+    set_auth_selection(form, modes[next_idx]);
+}
+
 fn edit_form_field(form: &mut HostFormState, key: KeyEvent) {
     if key
         .modifiers
@@ -421,7 +516,7 @@ fn edit_form_field(form: &mut HostFormState, key: KeyEvent) {
         HostFormField::Endpoints => Some(&mut form.endpoints),
         HostFormField::AuthValue => match form.auth_mode {
             HostAuthMode::Key => match form.key_input_mode {
-                HostKeyInputMode::Path => Some(&mut form.key_path),
+                HostKeyInputMode::Path => None,
                 HostKeyInputMode::Inline => Some(&mut form.key_inline),
             },
             HostAuthMode::Password => Some(&mut form.password),
@@ -497,7 +592,7 @@ fn insert_pasted_text(form: &mut HostFormState, text: &str) {
         HostFormField::Endpoints => Some(&mut form.endpoints),
         HostFormField::AuthValue => match form.auth_mode {
             HostAuthMode::Key => match form.key_input_mode {
-                HostKeyInputMode::Path => Some(&mut form.key_path),
+                HostKeyInputMode::Path => None,
                 HostKeyInputMode::Inline => Some(&mut form.key_inline),
             },
             HostAuthMode::Password => Some(&mut form.password),
@@ -610,35 +705,557 @@ fn current_field_value(form: &HostFormState) -> String {
     }
 }
 
-fn discover_key_files() -> Vec<String> {
-    let mut options = Vec::new();
-    let home = std::env::var("HOME").ok();
-    let Some(home) = home else {
-        return options;
+fn build_key_picker(form: &HostFormState) -> HostKeyPickerState {
+    let target_mode = form.key_input_mode;
+    let start_dir = starting_picker_dir(form, target_mode);
+    let (entries, error) = match read_picker_entries(&start_dir) {
+        Ok(entries) => (entries, None),
+        Err(err) => (Vec::new(), Some(err)),
     };
 
-    let ssh_dir = std::path::Path::new(&home).join(".ssh");
-    let Ok(entries) = std::fs::read_dir(ssh_dir) else {
-        return options;
+    HostKeyPickerState {
+        target_mode,
+        current_dir: start_dir.to_string_lossy().to_string(),
+        entries,
+        selected: 0,
+        scroll: 0,
+        command_input: String::new(),
+        completion_prefix: String::new(),
+        completion_matches: Vec::new(),
+        completion_index: 0,
+        command_history: Vec::new(),
+        history_index: None,
+        status: None,
+        error,
+    }
+}
+
+fn resolve_typed_picker_path(current_dir: &str, typed_path: &str) -> Result<PathBuf, String> {
+    let trimmed = typed_path.trim();
+    if trimmed.is_empty() {
+        return Err("Path input is empty".to_string());
+    }
+
+    let absolute = if let Some(stripped) = trimmed.strip_prefix("~/") {
+        if let Some(home) = home_dir() {
+            home.join(stripped)
+        } else {
+            PathBuf::from(trimmed)
+        }
+    } else if trimmed == "~" {
+        home_dir().unwrap_or_else(|| PathBuf::from("/"))
+    } else if Path::new(trimmed).is_absolute() {
+        PathBuf::from(trimmed)
+    } else {
+        Path::new(current_dir).join(trimmed)
+    };
+
+    if !absolute.exists() {
+        return Err(format!("Path does not exist: {}", absolute.display()));
+    }
+
+    Ok(absolute)
+}
+
+fn ensure_picker_selection_visible(picker: &mut HostKeyPickerState) {
+    if picker.selected < picker.scroll {
+        picker.scroll = picker.selected;
+    }
+}
+
+fn move_picker_to_dir(picker: &mut HostKeyPickerState, dir: &str) {
+    let path = Path::new(dir);
+    match read_picker_entries(path) {
+        Ok(entries) => {
+            picker.current_dir = path.to_string_lossy().to_string();
+            picker.entries = entries;
+            picker.selected = 0;
+            picker.scroll = 0;
+            picker.error = None;
+            picker.status = None;
+        }
+        Err(err) => {
+            picker.error = Some(err);
+        }
+    }
+}
+
+fn parent_dir_str(dir: &str) -> Option<String> {
+    Path::new(dir)
+        .parent()
+        .map(|parent| parent.to_string_lossy().to_string())
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var("HOME").ok().map(PathBuf::from)
+}
+
+fn starting_picker_dir(form: &HostFormState, mode: HostKeyInputMode) -> PathBuf {
+    if mode == HostKeyInputMode::Path {
+        let trimmed = form.key_path.trim();
+        if !trimmed.is_empty() {
+            let path = PathBuf::from(trimmed);
+            if path.is_dir() {
+                return path;
+            }
+            if path.is_file() {
+                return path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| PathBuf::from("/"));
+            }
+            if let Some(parent) = path.parent()
+                && parent.exists()
+            {
+                return parent.to_path_buf();
+            }
+        }
+    }
+
+    let home = home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    let ssh = home.join(".ssh");
+    if ssh.is_dir() { ssh } else { home }
+}
+
+fn read_picker_entries(dir: &Path) -> Result<Vec<HostKeyPickerEntry>, String> {
+    let mut dirs = Vec::new();
+    let mut files = Vec::new();
+
+    let entries = fs::read_dir(dir).map_err(|e| format!("Cannot open {}: {e}", dir.display()))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        if path.is_dir() {
+            dirs.push(HostKeyPickerEntry {
+                label: format!("{name}/"),
+                path: path.to_string_lossy().to_string(),
+                is_dir: true,
+            });
+            continue;
+        }
+
+        if path.is_file() {
+            files.push(HostKeyPickerEntry {
+                label: name.to_string(),
+                path: path.to_string_lossy().to_string(),
+                is_dir: false,
+            });
+        }
+    }
+
+    dirs.sort_by(|a, b| {
+        a.label
+            .to_ascii_lowercase()
+            .cmp(&b.label.to_ascii_lowercase())
+    });
+    files.sort_by(|a, b| {
+        a.label
+            .to_ascii_lowercase()
+            .cmp(&b.label.to_ascii_lowercase())
+    });
+
+    let mut merged = Vec::new();
+    if let Some(parent) = dir.parent() {
+        merged.push(HostKeyPickerEntry {
+            label: "../".to_string(),
+            path: parent.to_string_lossy().to_string(),
+            is_dir: true,
+        });
+    }
+    merged.extend(dirs);
+    merged.extend(files);
+
+    Ok(merged)
+}
+
+fn load_key_file_text(path: &str) -> Result<String, String> {
+    let bytes = fs::read(path).map_err(|e| format!("Cannot read key file {path}: {e}"))?;
+    let text = String::from_utf8(bytes)
+        .map_err(|_| format!("Cannot import {path}: file is not valid UTF-8 text"))?;
+    Ok(text)
+}
+
+fn apply_picker_file_selection(
+    form: &mut HostFormState,
+    picker: &mut HostKeyPickerState,
+    path: &str,
+) -> Result<(), String> {
+    match picker.target_mode {
+        HostKeyInputMode::Path => {
+            form.key_path = path.to_string();
+            form.caret = form.key_path.len();
+            form.error = None;
+            Ok(())
+        }
+        HostKeyInputMode::Inline => {
+            let private_key = load_key_file_text(path)?;
+            form.key_inline = private_key;
+            form.caret = form.key_inline.len();
+            form.error = None;
+            Ok(())
+        }
+    }
+}
+
+fn reset_picker_completion(picker: &mut HostKeyPickerState) {
+    picker.completion_prefix.clear();
+    picker.completion_matches.clear();
+    picker.completion_index = 0;
+}
+
+fn picker_history_up(picker: &mut HostKeyPickerState) {
+    if picker.command_history.is_empty() {
+        return;
+    }
+
+    let next_index = match picker.history_index {
+        Some(idx) if idx > 0 => idx - 1,
+        Some(idx) => idx,
+        None => picker.command_history.len().saturating_sub(1),
+    };
+    picker.history_index = Some(next_index);
+    if let Some(cmd) = picker.command_history.get(next_index) {
+        picker.command_input = cmd.clone();
+        reset_picker_completion(picker);
+    }
+}
+
+fn picker_history_down(picker: &mut HostKeyPickerState) {
+    let Some(current) = picker.history_index else {
+        return;
+    };
+
+    if current + 1 >= picker.command_history.len() {
+        picker.history_index = None;
+        picker.command_input.clear();
+        reset_picker_completion(picker);
+        return;
+    }
+
+    let next = current + 1;
+    picker.history_index = Some(next);
+    if let Some(cmd) = picker.command_history.get(next) {
+        picker.command_input = cmd.clone();
+        reset_picker_completion(picker);
+    }
+}
+
+fn execute_picker_command(form: &mut HostFormState, picker: &mut HostKeyPickerState) -> bool {
+    let command = picker.command_input.trim().to_string();
+    if command.is_empty() {
+        return false;
+    }
+
+    picker.command_history.push(command.clone());
+    picker.history_index = None;
+    reset_picker_completion(picker);
+    picker.error = None;
+    picker.status = None;
+
+    let mut parts = command.splitn(2, char::is_whitespace);
+    let cmd = parts.next().unwrap_or_default();
+    let arg = parts.next().unwrap_or_default().trim();
+
+    match cmd {
+        "cd" => {
+            if arg.is_empty() {
+                picker.error = Some("Usage: cd <path>".to_string());
+                return false;
+            }
+
+            match resolve_typed_picker_path(&picker.current_dir, arg) {
+                Ok(path) if path.is_dir() => {
+                    let next = path.to_string_lossy().to_string();
+                    move_picker_to_dir(picker, &next);
+                    picker.status = Some(format!("cd {}", picker.current_dir));
+                    picker.command_input.clear();
+                }
+                Ok(path) => {
+                    picker.error = Some(format!("Not a directory: {}", path.display()));
+                }
+                Err(err) => {
+                    picker.error = Some(err);
+                }
+            }
+            false
+        }
+        "select" => {
+            if arg.is_empty() {
+                picker.error = Some("Usage: select <path|name>".to_string());
+                return false;
+            }
+
+            let target = resolve_select_target_path(picker, arg);
+            match target {
+                Ok(path) if path.is_file() => {
+                    let chosen = path.to_string_lossy().to_string();
+                    match apply_picker_file_selection(form, picker, &chosen) {
+                        Ok(()) => {
+                            picker.status = Some(format!("selected {chosen}"));
+                            picker.command_input.clear();
+                            true
+                        }
+                        Err(err) => {
+                            picker.error = Some(err);
+                            false
+                        }
+                    }
+                }
+                Ok(path) if path.is_dir() => {
+                    picker.error = Some(format!(
+                        "{} is a directory; use ls {}",
+                        path.display(),
+                        path.display()
+                    ));
+                    false
+                }
+                Ok(path) => {
+                    picker.error = Some(format!("Cannot select {}", path.display()));
+                    false
+                }
+                Err(err) => {
+                    picker.error = Some(err);
+                    false
+                }
+            }
+        }
+        _ => {
+            picker.error = Some(format!("Unknown command: {cmd}. Try cd or select"));
+            false
+        }
+    }
+}
+
+fn resolve_select_target_path(picker: &HostKeyPickerState, arg: &str) -> Result<PathBuf, String> {
+    if let Ok(index) = arg.parse::<usize>()
+        && index > 0
+        && let Some(entry) = picker.entries.get(index - 1)
+    {
+        return Ok(PathBuf::from(&entry.path));
+    }
+
+    if let Some(entry) = picker.entries.iter().find(|entry| {
+        entry.label == arg
+            || entry.label.trim_end_matches('/') == arg
+            || Path::new(&entry.path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n == arg)
+    }) {
+        return Ok(PathBuf::from(&entry.path));
+    }
+
+    resolve_typed_picker_path(&picker.current_dir, arg)
+}
+
+fn apply_picker_tab_completion(picker: &mut HostKeyPickerState) {
+    let input = picker.command_input.clone();
+    let trimmed = input.trim_start();
+
+    if !trimmed.contains(' ') {
+        let commands = ["cd", "select"];
+        let token = trimmed;
+        let matches = commands
+            .iter()
+            .copied()
+            .filter(|cmd| cmd.starts_with(token))
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+
+        if matches.is_empty() {
+            picker.error = Some("No completion matches".to_string());
+            picker.status = None;
+            return;
+        }
+
+        if matches.len() == 1 {
+            picker.command_input = format!("{} ", matches[0]);
+            picker.error = None;
+            picker.status = None;
+            return;
+        }
+
+        let common = longest_common_prefix(&matches);
+        if common.len() > token.len() {
+            picker.command_input = common;
+            picker.error = None;
+            picker.status = None;
+            return;
+        }
+
+        picker.error = None;
+        picker.status = Some(format!("matches: {}", matches.join("  ")));
+        return;
+    } else {
+        let mut split = trimmed.splitn(2, char::is_whitespace);
+        let cmd = split.next().unwrap_or_default();
+        let arg_raw = split.next().unwrap_or_default().trim_start();
+        if !matches!(cmd, "cd" | "select") {
+            picker.error = Some("Tab completion supports cd/select paths".to_string());
+            picker.status = None;
+            return;
+        }
+
+        let matches = complete_path_candidates(&picker.current_dir, arg_raw);
+
+        if matches.is_empty() {
+            picker.error = Some("No completion matches".to_string());
+            picker.status = None;
+            return;
+        }
+
+        if matches.len() == 1 {
+            picker.command_input = format!("{cmd} {}", matches[0]);
+            picker.error = None;
+            picker.status = None;
+            return;
+        }
+
+        let common = longest_common_prefix(&matches);
+        if common.len() > arg_raw.len() {
+            picker.command_input = format!("{cmd} {common}");
+            picker.error = None;
+            picker.status = None;
+            return;
+        }
+
+        picker.error = None;
+        picker.status = Some(format!("matches: {}", matches.join("  ")));
+        return;
+    }
+}
+
+fn longest_common_prefix(values: &[String]) -> String {
+    let Some(first) = values.first() else {
+        return String::new();
+    };
+    let mut prefix = first.clone();
+    for value in values.iter().skip(1) {
+        let mut end = 0;
+        for (a, b) in prefix.chars().zip(value.chars()) {
+            if a != b {
+                break;
+            }
+            end += a.len_utf8();
+        }
+        prefix.truncate(end);
+        if prefix.is_empty() {
+            break;
+        }
+    }
+    prefix
+}
+
+fn complete_path_candidates(current_dir: &str, arg: &str) -> Vec<String> {
+    let partial = arg.trim();
+
+    let (base_dir, fragment, prefix_kind) = if partial.is_empty() {
+        (PathBuf::from(current_dir), String::new(), "relative")
+    } else if partial == "~" {
+        (
+            home_dir().unwrap_or_else(|| PathBuf::from("/")),
+            String::new(),
+            "home",
+        )
+    } else if partial.starts_with("~/") {
+        let home = home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let rest = partial.trim_start_matches("~/");
+        let pb = PathBuf::from(rest);
+        let base = if partial.ends_with('/') {
+            home.join(&pb)
+        } else {
+            home.join(pb.parent().unwrap_or_else(|| Path::new("")))
+        };
+        let frag = if partial.ends_with('/') {
+            String::new()
+        } else {
+            pb.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+        (base, frag, "home")
+    } else if Path::new(partial).is_absolute() {
+        let pb = PathBuf::from(partial);
+        let base = if partial.ends_with('/') {
+            pb.clone()
+        } else {
+            pb.parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| pb.clone())
+        };
+        let frag = if partial.ends_with('/') {
+            String::new()
+        } else {
+            pb.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+        (base, frag, "absolute")
+    } else {
+        let pb = PathBuf::from(partial);
+        let base = if partial.ends_with('/') {
+            Path::new(current_dir).join(&pb)
+        } else {
+            Path::new(current_dir).join(pb.parent().unwrap_or_else(|| Path::new("")))
+        };
+        let frag = if partial.ends_with('/') {
+            String::new()
+        } else {
+            pb.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+        (base, frag, "relative")
+    };
+
+    let mut results = Vec::new();
+    let Ok(entries) = fs::read_dir(&base_dir) else {
+        return results;
     };
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_file() {
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !name.starts_with(&fragment) {
             continue;
         }
-        if let Some(name) = path.file_name().and_then(|n| n.to_str())
-            && (name.ends_with(".pub") || name == "known_hosts" || name == "config")
-        {
-            continue;
+
+        let mut rendered = match prefix_kind {
+            "home" => {
+                if let Some(home) = home_dir() {
+                    if let Ok(rel) = path.strip_prefix(home) {
+                        format!("~/{}", rel.display())
+                    } else {
+                        path.to_string_lossy().to_string()
+                    }
+                } else {
+                    path.to_string_lossy().to_string()
+                }
+            }
+            "absolute" => path.to_string_lossy().to_string(),
+            _ => path
+                .strip_prefix(current_dir)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| path.to_string_lossy().to_string()),
+        };
+
+        if path.is_dir() && !rendered.ends_with('/') {
+            rendered.push('/');
         }
-        if let Some(text) = path.to_str() {
-            options.push(text.to_string());
-        }
+        results.push(rendered);
     }
 
-    options.sort();
-    options
+    results.sort_by_key(|a| a.to_ascii_lowercase());
+    results
 }
 
 #[derive(Clone, Copy)]
@@ -907,11 +1524,19 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
             HostModalMode::Create => "Create Host",
             HostModalMode::Edit { .. } => "Edit Host",
         },
-        "Tab move | Enter next/save | Ctrl+S save | F file picker | Esc cancel",
+        "Tab/Up/Down move | Ctrl+S save | Esc",
     );
 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
+
+    let auth_value_height = if modal.form.auth_mode == HostAuthMode::Key
+        && modal.form.key_input_mode == HostKeyInputMode::Inline
+    {
+        5
+    } else {
+        3
+    };
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -920,7 +1545,7 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
             Constraint::Length(3),
             Constraint::Length(5),
             Constraint::Length(3),
-            Constraint::Length(5),
+            Constraint::Length(auth_value_height),
             Constraint::Min(1),
         ])
         .split(inner);
@@ -933,6 +1558,7 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
         modal.form.focus == HostFormField::Name,
         modal.form.caret,
         false,
+        None,
     );
     render_input_field(
         frame,
@@ -942,6 +1568,7 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
         modal.form.focus == HostFormField::User,
         modal.form.caret,
         false,
+        None,
     );
     render_input_field(
         frame,
@@ -951,35 +1578,30 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
         modal.form.focus == HostFormField::Endpoints,
         modal.form.caret,
         false,
+        None,
     );
 
-    let auth_text = if modal.form.auth_mode == HostAuthMode::Key {
-        format!(
-            "key ({})",
-            if modal.form.key_input_mode == HostKeyInputMode::Path {
-                "path"
-            } else {
-                "inline"
-            }
-        )
-    } else {
-        "password".to_string()
+    let auth_text = match auth_selection(&modal.form) {
+        AuthSelection::KeyPath => "key path on system".to_string(),
+        AuthSelection::KeyInline => "key in database".to_string(),
+        AuthSelection::Password => "password".to_string(),
     };
     render_input_field(
         frame,
         chunks[3],
-        "Auth mode (Left/Right toggle, Space switches key source)",
+        "Auth mode [Left/Right cycles: path key, db key, password]",
         &auth_text,
         modal.form.focus == HostFormField::AuthMode,
         modal.form.caret,
         false,
+        None,
     );
 
     let auth_value_label = if modal.form.auth_mode == HostAuthMode::Key {
         if modal.form.key_input_mode == HostKeyInputMode::Path {
-            "Key path (press F to browse ~/.ssh)"
+            "System key [Enter/Right select]"
         } else {
-            "Private key content (paste supported)"
+            "Load key into DB (paste or import from picker)"
         }
     } else {
         "Password"
@@ -1002,6 +1624,13 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
         modal.form.focus == HostFormField::AuthValue,
         modal.form.caret,
         modal.form.auth_mode == HostAuthMode::Password,
+        if modal.form.auth_mode == HostAuthMode::Key
+            && modal.form.key_input_mode == HostKeyInputMode::Path
+        {
+            Some("no key selected")
+        } else {
+            None
+        },
     );
 
     if let Some(error_text) = &modal.form.error {
@@ -1032,6 +1661,7 @@ fn render_input_field(
     selected: bool,
     caret: usize,
     secret: bool,
+    placeholder: Option<&str>,
 ) {
     let block = Block::default()
         .title(if selected {
@@ -1049,18 +1679,30 @@ fn render_input_field(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    let showing_placeholder = value.is_empty() && placeholder.is_some();
     let text_value = if secret {
         mask(value)
+    } else if let Some(placeholder_text) = placeholder {
+        if value.is_empty() {
+            placeholder_text.to_string()
+        } else {
+            value.to_string()
+        }
     } else {
         value.to_string()
     };
 
-    let line = if selected {
+    let line = if selected && !showing_placeholder {
         line_with_caret_value(&text_value, caret)
     } else {
         Line::from(text_value)
     };
-    frame.render_widget(Paragraph::new(line).style(text()), inner);
+    let value_style = if showing_placeholder {
+        muted_text()
+    } else {
+        text()
+    };
+    frame.render_widget(Paragraph::new(line).style(value_style), inner);
 }
 
 fn line_with_caret_value(text_value: &str, caret: usize) -> Line<'static> {
@@ -1082,36 +1724,110 @@ fn line_with_caret_value(text_value: &str, caret: usize) -> Line<'static> {
     ])
 }
 
+fn line_with_caret_prefix(prefix: &str, text_value: &str, caret: usize) -> Line<'static> {
+    let safe_caret = caret.min(text_value.len());
+    let before = text_value[..safe_caret].to_string();
+    let current = text_value[safe_caret..].chars().next().unwrap_or(' ');
+    let after = if safe_caret < text_value.len() {
+        text_value[safe_caret + current.len_utf8()..].to_string()
+    } else {
+        String::new()
+    };
+
+    Line::from(vec![
+        Span::styled(prefix.to_string(), muted_text()),
+        Span::raw(before),
+        Span::styled(
+            current.to_string(),
+            Style::default().add_modifier(Modifier::REVERSED),
+        ),
+        Span::raw(after),
+    ])
+}
+
 fn render_key_picker(frame: &mut Frame, host_popup: Rect, picker: &HostKeyPickerState) {
     let width = (host_popup.width.saturating_sub(8)).min(90);
-    let height = 12;
+    let height = 16;
     let area = centered_rect_no_border(width, height, host_popup);
     frame.render_widget(Clear, area);
-    let block = modal_block("Select key file", "Up/Down move | Enter choose | Esc close");
+    let mode_hint = if picker.target_mode == HostKeyInputMode::Path {
+        "Path mode"
+    } else {
+        "Load-into-DB mode"
+    };
+    let block = modal_block(
+        "File Tree Picker",
+        "Commands: cd <path>, select <path|name> | Tab complete | Enter run | Esc close",
+    );
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    frame.render_widget(
+        Paragraph::new(format!("{mode_hint} | {}", picker.current_dir)).style(muted_text()),
+        chunks[0],
+    );
+    frame.render_widget(
+        Paragraph::new(line_with_caret_prefix(
+            "> ",
+            &picker.command_input,
+            picker.command_input.len(),
+        ))
+        .style(accent_text()),
+        chunks[1],
+    );
+
     let mut lines = Vec::new();
-    if picker.options.is_empty() {
-        lines.push("  no files found in ~/.ssh".to_string());
+    let visible = chunks[2].height as usize;
+    let mut start = picker.scroll;
+    let max_selected = picker.entries.len().saturating_sub(1);
+    let selected = picker.selected.min(max_selected);
+    if visible > 0 && selected >= start.saturating_add(visible) {
+        start = selected + 1 - visible;
+    }
+
+    if picker.entries.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  no files or directories found",
+            muted_text(),
+        )));
     } else {
-        for (idx, path) in picker
-            .options
-            .iter()
-            .enumerate()
-            .take(inner.height as usize)
-        {
-            let marker = if idx == picker.selected { ">" } else { " " };
-            lines.push(format!("{marker} {path}"));
+        for (idx, entry) in picker.entries.iter().enumerate().skip(start).take(visible) {
+            let marker = if idx == selected { ">" } else { " " };
+            let entry_style = if entry.is_dir { muted_text() } else { text() };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{marker} "), text()),
+                Span::styled(entry.label.clone(), entry_style),
+            ]));
         }
     }
 
-    frame.render_widget(Paragraph::new(lines.join("\n")).style(text()), inner);
+    frame.render_widget(Paragraph::new(lines), chunks[2]);
+
+    let status_line = picker
+        .error
+        .as_deref()
+        .map(|msg| (msg, danger_text()))
+        .or_else(|| picker.status.as_deref().map(|msg| (msg, muted_text())))
+        .unwrap_or((" ", muted_text()));
+    frame.render_widget(
+        Paragraph::new(status_line.0).style(status_line.1),
+        chunks[3],
+    );
 }
 
 fn keybind_hint(state: &DashboardState, app: &AppState, area: Rect) -> &'static str {
     if state.host_modal.is_some() {
-        return "HOST form: Tab move | Enter next/save | Ctrl+S save | paste/drag text | Esc cancel";
+        return "HOST form: Tab/Up/Down move | Ctrl+S save | Esc";
     }
 
     if state.quick_switcher.is_some() {

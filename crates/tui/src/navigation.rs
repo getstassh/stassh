@@ -322,9 +322,27 @@ pub(crate) struct HostModalState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HostKeyPickerEntry {
+    pub(crate) label: String,
+    pub(crate) path: String,
+    pub(crate) is_dir: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct HostKeyPickerState {
-    pub(crate) options: Vec<String>,
+    pub(crate) target_mode: HostKeyInputMode,
+    pub(crate) current_dir: String,
+    pub(crate) entries: Vec<HostKeyPickerEntry>,
     pub(crate) selected: usize,
+    pub(crate) scroll: usize,
+    pub(crate) command_input: String,
+    pub(crate) completion_prefix: String,
+    pub(crate) completion_matches: Vec<String>,
+    pub(crate) completion_index: usize,
+    pub(crate) command_history: Vec<String>,
+    pub(crate) history_index: Option<usize>,
+    pub(crate) status: Option<String>,
+    pub(crate) error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
