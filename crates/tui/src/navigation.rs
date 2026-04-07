@@ -85,6 +85,7 @@ pub(crate) enum SshSessionPhase {
     TrustPrompt {
         host_id: u32,
         challenge: TrustChallenge,
+        choice: YesNoState,
     },
     Running {
         live: LiveSshSession,

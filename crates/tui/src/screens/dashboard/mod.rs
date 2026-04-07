@@ -1406,7 +1406,7 @@ fn render_update_prompt_modal(
     frame.render_widget(Clear, popup_area);
     let block = modal_block(
         "Update available",
-        "<-/-> or Tab switch | Enter confirm | Esc skip this launch",
+        "<-/-> or Tab switch | Enter confirm | Esc skip",
     );
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
@@ -1414,15 +1414,15 @@ fn render_update_prompt_modal(
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Min(0),
-            Constraint::Length(1),
+            Constraint::Length(2),
         ])
         .split(inner);
 
     let details = Paragraph::new(format!(
-        "Install {} now?\nCurrent: {}\n",
+        "Upgrade to {} from {}?\n",
         update_prompt.latest_version, update_prompt.current_version
     ))
     .alignment(Alignment::Center)
@@ -1436,7 +1436,7 @@ fn render_update_prompt_modal(
 
     let actions = Paragraph::new(Line::from(vec![
         Span::styled(
-            button("Install now", update_prompt.choice.is_yes()),
+            button("Update now", update_prompt.choice.is_yes()),
             if update_prompt.choice.is_yes() {
                 accent_text()
             } else {
@@ -1445,7 +1445,7 @@ fn render_update_prompt_modal(
         ),
         Span::styled(" ", muted_text()),
         Span::styled(
-            button("Skip this launch", update_prompt.choice.is_no()),
+            button("Skip this", update_prompt.choice.is_no()),
             if update_prompt.choice.is_no() {
                 accent_text()
             } else {

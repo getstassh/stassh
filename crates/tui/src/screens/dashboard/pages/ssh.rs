@@ -9,12 +9,13 @@ use ratatui::{
 };
 
 use crate::{
+    inputs::handle_yes_no_input,
     navigation::{DashboardPage, DashboardState, SshSessionPhase},
     screens::AppEffect,
     ssh_client::{
         SessionEvent, SessionInput, StartSessionResult, TrustChallenge, start_session_async,
     },
-    ui::{centered_rect_no_border, modal_block, text},
+    ui::{accent_text, button, centered_rect_no_border, modal_block, muted_text, text},
 };
 
 pub(crate) fn handle_key(key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
@@ -41,13 +42,19 @@ pub(crate) fn handle_key(key: KeyEvent, state: &mut DashboardState) -> Option<Ap
                 close_status = Some("Connection canceled".to_string());
             }
         }
-        SshSessionPhase::TrustPrompt { host_id, challenge } => {
-            if matches!(key.code, KeyCode::Char('y') | KeyCode::Enter) {
-                trust_key = Some((*host_id, challenge.proposed_key.clone()));
-            }
-
-            if matches!(key.code, KeyCode::Char('n') | KeyCode::Esc) {
+        SshSessionPhase::TrustPrompt {
+            host_id,
+            challenge,
+            choice,
+        } => {
+            if key.code == KeyCode::Esc {
                 close_status = Some("Connection canceled: host key not trusted".to_string());
+            } else if let Some(trust_now) = handle_yes_no_input(choice, key.code) {
+                if trust_now {
+                    trust_key = Some((*host_id, challenge.proposed_key.clone()));
+                } else {
+                    close_status = Some("Connection canceled: host key not trusted".to_string());
+                }
             }
         }
         SshSessionPhase::Running { live } => {
@@ -149,6 +156,7 @@ pub(crate) fn tick_tabs(app: &AppState, state: &mut DashboardState) {
                                     next_phase = Some(SshSessionPhase::TrustPrompt {
                                         host_id: *host_id,
                                         challenge,
+                                        choice: crate::navigation::YesNoState { selected: false },
                                     });
                                 }
                                 StartSessionResult::Error(error) => {
@@ -246,12 +254,14 @@ pub(crate) fn render(frame: &mut Frame, app_area: Rect, area: Rect, state: &Dash
                 split[1],
             );
         }
-        SshSessionPhase::TrustPrompt { challenge, .. } => {
+        SshSessionPhase::TrustPrompt {
+            challenge, choice, ..
+        } => {
             frame.render_widget(
                 Paragraph::new(render_vt100_text(&tab.parser)).alignment(Alignment::Left),
                 area,
             );
-            render_trust_modal(frame, app_area, challenge);
+            render_trust_modal(frame, app_area, challenge, choice);
         }
         SshSessionPhase::Running { .. } => {
             frame.render_widget(
@@ -292,19 +302,33 @@ fn trust_host_key(app: &mut crate::app::App, key: TrustedHostKey) {
     let _ = app.save_db();
 }
 
-fn render_trust_modal(frame: &mut Frame, app_area: Rect, challenge: &TrustChallenge) {
+fn render_trust_modal(
+    frame: &mut Frame,
+    app_area: Rect,
+    challenge: &TrustChallenge,
+    choice: &crate::navigation::YesNoState,
+) {
     let width = (app_area.width.saturating_sub(4)).min(90);
-    let height = 12;
+    let height = 14;
     let popup_area = centered_rect_no_border(width, height, app_area);
 
     frame.render_widget(Clear, popup_area);
     let block = modal_block(
         "Host Key Verification",
-        "Y/Enter trust and connect | N/Esc cancel",
+        "<-/-> or Tab switch | Enter confirm | Esc cancel",
     );
 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(2),
+        ])
+        .split(inner);
 
     let body = if let Some(previous) = &challenge.previous_fingerprint {
         format!(
@@ -329,8 +353,30 @@ fn render_trust_modal(frame: &mut Frame, app_area: Rect, challenge: &TrustChalle
         Paragraph::new(body)
             .alignment(Alignment::Left)
             .style(text()),
-        inner,
+        chunks[0],
     );
+
+    let actions = Paragraph::new(Line::from(vec![
+        Span::styled(
+            button("Trust and connect", choice.is_yes()),
+            if choice.is_yes() {
+                accent_text()
+            } else {
+                muted_text()
+            },
+        ),
+        Span::styled(" ", muted_text()),
+        Span::styled(
+            button("Cancel", choice.is_no()),
+            if choice.is_no() {
+                accent_text()
+            } else {
+                muted_text()
+            },
+        ),
+    ]))
+    .alignment(Alignment::Center);
+    frame.render_widget(actions, chunks[2]);
 }
 
 fn render_vt100_text(parser: &vt100::Parser) -> Text<'static> {

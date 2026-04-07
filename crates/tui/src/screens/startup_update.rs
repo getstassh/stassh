@@ -78,8 +78,8 @@ fn ui(frame: &mut Frame, _app: &backend::AppState, state: &StartupUpdateState) {
         frame,
         frame.area(),
         crate::screens::components::LogoType::Simple,
-        "Update available",
-        "Enter install | S skip this launch",
+        "Updating",
+        "A new version of stassh is being installed",
     );
 
     let split = Layout::default()
