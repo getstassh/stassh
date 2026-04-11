@@ -58,11 +58,17 @@ pub(crate) struct SshSessionState {
 }
 
 impl SshSessionState {
-    pub(crate) fn new_starting(title: String, rows: u16, cols: u16, host_id: u32) -> Self {
+    pub(crate) fn new_starting(
+        title: String,
+        rows: u16,
+        cols: u16,
+        host_id: u32,
+        selected_endpoint_index: Option<usize>,
+    ) -> Self {
         Self {
             title,
             parser: vt100::Parser::new(rows, cols, 10_000),
-            phase: SshSessionPhase::starting(host_id),
+            phase: SshSessionPhase::starting(host_id, selected_endpoint_index),
             last_good_rows: rows.max(1),
             last_good_cols: cols.max(1),
         }
@@ -78,12 +84,14 @@ impl SshSessionState {
 pub(crate) enum SshSessionPhase {
     Starting {
         host_id: u32,
+        selected_endpoint_index: Option<usize>,
         pending: Option<PendingSshStart>,
         spinner_frame: usize,
         started_at: Instant,
     },
     TrustPrompt {
         host_id: u32,
+        selected_endpoint_index: Option<usize>,
         challenge: TrustChallenge,
         choice: YesNoState,
     },
@@ -93,9 +101,10 @@ pub(crate) enum SshSessionPhase {
 }
 
 impl SshSessionPhase {
-    pub(crate) fn starting(host_id: u32) -> Self {
+    pub(crate) fn starting(host_id: u32, selected_endpoint_index: Option<usize>) -> Self {
         Self::Starting {
             host_id,
+            selected_endpoint_index,
             pending: None,
             spinner_frame: 0,
             started_at: Instant::now(),
@@ -114,6 +123,7 @@ pub(crate) struct DashboardState {
     pub(crate) active_page: DashboardPage,
     pub(crate) selected_host: usize,
     pub(crate) host_modal: Option<HostModalState>,
+    pub(crate) endpoint_picker: Option<EndpointPickerState>,
     pub(crate) quick_switcher: Option<QuickSwitcherState>,
     pub(crate) last_status: Option<String>,
     pub(crate) host_statuses: HashMap<u32, Vec<HostConnectionStatus>>,
@@ -208,6 +218,7 @@ impl DashboardState {
             active_page: DashboardPage::Home,
             selected_host: 0,
             host_modal: None,
+            endpoint_picker: None,
             quick_switcher: None,
             last_status: None,
             host_statuses: HashMap::new(),
@@ -221,6 +232,15 @@ impl DashboardState {
             update_prompt: None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EndpointPickerState {
+    pub(crate) host_id: u32,
+    pub(crate) host_name: String,
+    pub(crate) host_user: String,
+    pub(crate) endpoints: Vec<backend::SshEndpoint>,
+    pub(crate) selected: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]

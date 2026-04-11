@@ -19,14 +19,15 @@ use ratatui::{
 use crate::{
     inputs::handle_yes_no_input,
     navigation::{
-        DashboardPage, DashboardState, DashboardUpdatePromptState, HostAuthMode,
-        HostConnectionStatus, HostFormField, HostFormState, HostKeyInputMode, HostKeyPickerEntry,
-        HostKeyPickerState, HostModalMode, HostModalState, HostProbeTask, Screen,
+        DashboardPage, DashboardState, DashboardUpdatePromptState, EndpointPickerState,
+        HostAuthMode, HostConnectionStatus, HostFormField, HostFormState, HostKeyInputMode,
+        HostKeyPickerEntry, HostKeyPickerState, HostModalMode, HostModalState, HostProbeTask,
+        Screen,
     },
     screens::{AppEffect, ScreenHandler},
     ui::{
         accent_text, border, button, centered_rect_no_border, danger_text, frame_block, full_rect,
-        modal_block, muted_text, selected_border, text,
+        modal_block, muted_text, selected_border, success_text, text,
     },
 };
 
@@ -59,6 +60,10 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
 
     if let Some(modal) = &mut state.host_modal {
         return handle_modal_key(app, key, state.selected_host, modal);
+    }
+
+    if state.endpoint_picker.is_some() {
+        return handle_endpoint_picker_key(key, state);
     }
 
     if state.quick_switcher.is_some() {
@@ -95,6 +100,10 @@ fn handle_paste(_app: &AppState, text: &str, state: &mut DashboardState) -> Opti
             return None;
         }
         insert_pasted_text(&mut modal.form, text);
+        return None;
+    }
+
+    if state.endpoint_picker.is_some() {
         return None;
     }
 
@@ -352,6 +361,67 @@ fn handle_modal_key(
     }
 
     edit_form_field(&mut modal.form, key);
+    None
+}
+
+fn handle_endpoint_picker_key(key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
+    if key.kind != KeyEventKind::Press && key.kind != KeyEventKind::Repeat {
+        return None;
+    }
+
+    let Some(picker) = &mut state.endpoint_picker else {
+        return None;
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            state.endpoint_picker = None;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            picker.selected = picker.selected.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let max = picker.endpoints.len().saturating_sub(1);
+            picker.selected = (picker.selected + 1).min(max);
+        }
+        KeyCode::Enter => {
+            let host_id = picker.host_id;
+            let selected_endpoint_index = picker
+                .selected
+                .min(picker.endpoints.len().saturating_sub(1));
+            if let Some(endpoint) = picker.endpoints.get(selected_endpoint_index).cloned() {
+                let title = format!(
+                    "{} - {}@{}:{}",
+                    picker.host_name, picker.host_user, endpoint.host, endpoint.port
+                );
+                let rows_cols = crossterm::terminal::size().unwrap_or((120, 40));
+                let rows = rows_cols.1;
+                let cols = rows_cols.0;
+                state
+                    .ssh_tabs
+                    .push(crate::navigation::SshSessionState::new_starting(
+                        title,
+                        rows,
+                        cols,
+                        host_id,
+                        Some(selected_endpoint_index),
+                    ));
+                let idx = state.ssh_tabs.len().saturating_sub(1);
+                state.active_ssh_tab = Some(idx);
+                state.active_page = DashboardPage::Ssh;
+                state.endpoint_picker = None;
+
+                return Some(Box::new(move |app| {
+                    app.db
+                        .remembered_endpoint_indices
+                        .insert(host_id, selected_endpoint_index);
+                    let _ = app.save_db();
+                }));
+            }
+        }
+        _ => {}
+    }
+
     None
 }
 
@@ -1564,6 +1634,10 @@ fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
         render_host_modal(frame, a, modal);
     }
 
+    if let Some(endpoint_picker) = &state.endpoint_picker {
+        render_endpoint_picker_modal(frame, a, state, endpoint_picker);
+    }
+
     if state.quick_switcher.is_some() {
         render_quick_switcher_modal(frame, a, state);
     }
@@ -1634,6 +1708,67 @@ fn render_update_prompt_modal(
     ]))
     .alignment(Alignment::Center);
     frame.render_widget(actions, chunks[3]);
+}
+
+fn render_endpoint_picker_modal(
+    frame: &mut Frame,
+    app_area: Rect,
+    state: &DashboardState,
+    picker: &EndpointPickerState,
+) {
+    let width = (app_area.width.saturating_sub(8)).min(90);
+    let height = 14;
+    let popup_area = centered_rect_no_border(width, height, app_area);
+    let modal_title = format!("Select endpoint for {}", picker.host_name);
+
+    frame.render_widget(Clear, popup_area);
+    let block = modal_block(
+        &modal_title,
+        "Up/Down or j/k move | Enter connect | Esc cancel",
+    );
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let visible_count = inner.height.max(1) as usize;
+    let selected = picker
+        .selected
+        .min(picker.endpoints.len().saturating_sub(1));
+    let start = selected.saturating_sub(visible_count.saturating_sub(1));
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for (display_idx, endpoint) in picker
+        .endpoints
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(visible_count)
+    {
+        let marker = if display_idx == selected { ">" } else { " " };
+        let status = state
+            .host_statuses
+            .get(&picker.host_id)
+            .and_then(|statuses| statuses.get(display_idx))
+            .copied()
+            .unwrap_or(HostConnectionStatus::Unknown);
+        let (status_label, status_style) = match status {
+            HostConnectionStatus::Reachable => ("reachable", success_text()),
+            HostConnectionStatus::Unreachable => ("unreachable", danger_text()),
+            HostConnectionStatus::Unknown => ("unknown", muted_text()),
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{marker} {}:{}  ", endpoint.host, endpoint.port),
+                text(),
+            ),
+            Span::styled(status_label, status_style),
+        ]));
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(" no endpoints", muted_text())));
+    }
+
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn render_quick_switcher_modal(frame: &mut Frame, app_area: Rect, state: &DashboardState) {
@@ -2028,6 +2163,10 @@ fn keybind_hint(state: &DashboardState) -> &'static str {
 
     if state.host_modal.is_some() {
         return "Tab/Up/Down move | Ctrl+S save | Esc";
+    }
+
+    if state.endpoint_picker.is_some() {
+        return "Up/Down or j/k move | Enter connect | Esc cancel";
     }
 
     if state.quick_switcher.is_some() {

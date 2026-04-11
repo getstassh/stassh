@@ -1,6 +1,6 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{collections::HashMap, fs};
 
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
@@ -65,6 +65,7 @@ pub struct Database {
     pub hosts: Vec<SshHost>,
     pub next_host_id: u32,
     pub trusted_host_keys: Vec<TrustedHostKey>,
+    pub remembered_endpoint_indices: HashMap<u32, usize>,
 }
 
 impl Database {
@@ -73,6 +74,7 @@ impl Database {
             hosts: Vec::new(),
             next_host_id: 1,
             trusted_host_keys: Vec::new(),
+            remembered_endpoint_indices: HashMap::new(),
         }
     }
 }
@@ -270,6 +272,13 @@ pub(crate) fn load_state(passphrase: Option<&str>) -> Result<(Database, Config)>
     let mut db = load_database(&conn)?;
 
     db.next_host_id = db.next_host_id.max(max_host_id_plus_one(&db.hosts));
+    db.remembered_endpoint_indices
+        .retain(|host_id, endpoint_index| {
+            db.hosts
+                .iter()
+                .find(|host| host.id == *host_id)
+                .is_some_and(|host| *endpoint_index < host.endpoints.len())
+        });
     config.ssh_idle_timeout_seconds = config.ssh_idle_timeout_seconds.max(1);
     config.ssh_connect_timeout_seconds = config.ssh_connect_timeout_seconds.max(1);
 
@@ -552,6 +561,7 @@ fn load_or_init_config(conn: &Connection) -> Result<Config> {
 
 fn load_database(conn: &Connection) -> Result<Database> {
     let next_host_id = read_next_host_id(conn)?;
+    let remembered_endpoint_indices = read_remembered_endpoint_indices(conn)?;
 
     let mut hosts_stmt = conn
         .prepare("SELECT id, name, user, auth_json_value FROM hosts ORDER BY id ASC")
@@ -611,6 +621,7 @@ fn load_database(conn: &Connection) -> Result<Database> {
         hosts,
         next_host_id,
         trusted_host_keys,
+        remembered_endpoint_indices,
     })
 }
 
@@ -684,6 +695,13 @@ fn save_database(conn: &Connection, db: &Database) -> Result<()> {
         "INSERT INTO app_meta(key, json_value) VALUES('next_host_id', ?1)
          ON CONFLICT(key) DO UPDATE SET json_value = excluded.json_value",
         params![serde_json::to_string(&next_host_id)?],
+    )
+    .map_err(map_sql_error)?;
+
+    tx.execute(
+        "INSERT INTO app_meta(key, json_value) VALUES('remembered_endpoint_indices', ?1)
+         ON CONFLICT(key) DO UPDATE SET json_value = excluded.json_value",
+        params![serde_json::to_string(&db.remembered_endpoint_indices)?],
     )
     .map_err(map_sql_error)?;
 
@@ -763,6 +781,25 @@ fn auth_kind(auth: &HostAuth) -> &'static str {
         HostAuth::KeyInline { .. } => "key_inline",
         HostAuth::Password { .. } => "password",
     }
+}
+
+fn read_remembered_endpoint_indices(conn: &Connection) -> Result<HashMap<u32, usize>> {
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT json_value FROM app_meta WHERE key = 'remembered_endpoint_indices'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(map_sql_error)?;
+
+    if let Some(value) = value {
+        let parsed: HashMap<u32, usize> =
+            serde_json::from_str(&value).context("invalid remembered_endpoint_indices value")?;
+        return Ok(parsed);
+    }
+
+    Ok(HashMap::new())
 }
 
 fn max_host_id_plus_one(hosts: &[SshHost]) -> u32 {

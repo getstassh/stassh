@@ -31,7 +31,7 @@ pub(crate) fn handle_key(key: KeyEvent, state: &mut DashboardState) -> Option<Ap
     };
 
     let mut close_status: Option<String> = None;
-    let mut trust_key: Option<(u32, TrustedHostKey)> = None;
+    let mut trust_key: Option<(u32, Option<usize>, TrustedHostKey)> = None;
 
     match &mut tab.phase {
         SshSessionPhase::Starting { pending, .. } => {
@@ -44,6 +44,7 @@ pub(crate) fn handle_key(key: KeyEvent, state: &mut DashboardState) -> Option<Ap
         }
         SshSessionPhase::TrustPrompt {
             host_id,
+            selected_endpoint_index,
             challenge,
             choice,
         } => {
@@ -51,7 +52,11 @@ pub(crate) fn handle_key(key: KeyEvent, state: &mut DashboardState) -> Option<Ap
                 close_status = Some("Connection canceled: host key not trusted".to_string());
             } else if let Some(trust_now) = handle_yes_no_input(choice, key.code) {
                 if trust_now {
-                    trust_key = Some((*host_id, challenge.proposed_key.clone()));
+                    trust_key = Some((
+                        *host_id,
+                        *selected_endpoint_index,
+                        challenge.proposed_key.clone(),
+                    ));
                 } else {
                     close_status = Some("Connection canceled: host key not trusted".to_string());
                 }
@@ -69,9 +74,9 @@ pub(crate) fn handle_key(key: KeyEvent, state: &mut DashboardState) -> Option<Ap
         }
     }
 
-    if let Some((host_id, key)) = trust_key {
+    if let Some((host_id, selected_endpoint_index, key)) = trust_key {
         if let Some(tab) = state.ssh_tabs.get_mut(tab_idx) {
-            tab.phase = SshSessionPhase::starting(host_id);
+            tab.phase = SshSessionPhase::starting(host_id, selected_endpoint_index);
         }
         return Some(Box::new(move |app| {
             trust_host_key(app, key);
@@ -124,6 +129,7 @@ pub(crate) fn tick_tabs(app: &AppState, state: &mut DashboardState) {
         match &mut tab.phase {
             SshSessionPhase::Starting {
                 host_id,
+                selected_endpoint_index,
                 pending,
                 spinner_frame,
                 ..
@@ -134,6 +140,7 @@ pub(crate) fn tick_tabs(app: &AppState, state: &mut DashboardState) {
                     if let Some(host) = app.db.hosts.iter().find(|h| h.id == *host_id).cloned() {
                         *pending = Some(start_session_async(
                             &host,
+                            *selected_endpoint_index,
                             &app.db.trusted_host_keys,
                             tab.last_good_rows,
                             tab.last_good_cols,
@@ -155,6 +162,7 @@ pub(crate) fn tick_tabs(app: &AppState, state: &mut DashboardState) {
                                 StartSessionResult::TrustRequired(challenge) => {
                                     next_phase = Some(SshSessionPhase::TrustPrompt {
                                         host_id: *host_id,
+                                        selected_endpoint_index: *selected_endpoint_index,
                                         challenge,
                                         choice: crate::navigation::YesNoState { selected: false },
                                     });

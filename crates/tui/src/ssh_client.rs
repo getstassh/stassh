@@ -199,6 +199,7 @@ impl client::Handler for VerifyHandler {
 
 pub(crate) fn start_session_async(
     host: &SshHost,
+    selected_endpoint_index: Option<usize>,
     trusted_host_keys: &[TrustedHostKey],
     rows: u16,
     cols: u16,
@@ -235,6 +236,7 @@ pub(crate) fn start_session_async(
         let outcome = runtime.block_on(async {
             connect_and_run(
                 host,
+                selected_endpoint_index,
                 trusted_host_keys,
                 rows,
                 cols,
@@ -275,6 +277,7 @@ pub(crate) fn start_session_async(
 
 async fn connect_and_run(
     host: SshHost,
+    selected_endpoint_index: Option<usize>,
     trusted_host_keys: Vec<TrustedHostKey>,
     rows: u16,
     cols: u16,
@@ -296,7 +299,17 @@ async fn connect_and_run(
     let mut last_error: Option<anyhow::Error> = None;
     let mut session = None;
 
-    for endpoint in host.endpoints {
+    let endpoints = if let Some(index) = selected_endpoint_index {
+        host.endpoints
+            .get(index)
+            .cloned()
+            .map(|endpoint| vec![endpoint])
+            .unwrap_or_default()
+    } else {
+        host.endpoints.clone()
+    };
+
+    for endpoint in endpoints {
         let handler = VerifyHandler {
             host: endpoint.host.clone(),
             port: endpoint.port,
@@ -394,6 +407,9 @@ async fn connect_and_run(
         }
         if let Some(err) = last_error {
             return Err(err);
+        }
+        if selected_endpoint_index.is_some() {
+            bail!("selected endpoint is no longer available for connection");
         }
         bail!("no endpoints available for connection");
     };

@@ -10,8 +10,8 @@ use ratatui::{
 
 use crate::{
     navigation::{
-        DashboardPage, DashboardState, HostConnectionStatus, HostFormState, HostModalMode,
-        HostModalState, SshSessionState,
+        DashboardPage, DashboardState, EndpointPickerState, HostConnectionStatus, HostFormState,
+        HostModalMode, HostModalState, SshSessionState,
     },
     screens::AppEffect,
     ui::{
@@ -59,21 +59,42 @@ pub(crate) fn handle_key(
         }
         KeyCode::Enter => {
             if let Some(host) = app.db.hosts.get(state.selected_host) {
-                let host_id = host.id;
-                let primary = host.endpoints.first();
-                let endpoint = primary
-                    .map(|e| format!("{}:{}", e.host, e.port))
-                    .unwrap_or_else(|| "n/a".to_string());
-                let title = format!("{} - {}@{}", host.name, host.user, endpoint);
-                let rows_cols = crossterm::terminal::size().unwrap_or((120, 40));
-                let rows = rows_cols.1;
-                let cols = rows_cols.0;
-                state
-                    .ssh_tabs
-                    .push(SshSessionState::new_starting(title, rows, cols, host_id));
-                let idx = state.ssh_tabs.len().saturating_sub(1);
-                state.active_ssh_tab = Some(idx);
-                state.active_page = DashboardPage::Ssh;
+                if host.endpoints.len() > 1 {
+                    let preferred = app
+                        .db
+                        .remembered_endpoint_indices
+                        .get(&host.id)
+                        .copied()
+                        .unwrap_or(0)
+                        .min(host.endpoints.len().saturating_sub(1));
+                    state.endpoint_picker = Some(EndpointPickerState {
+                        host_id: host.id,
+                        host_name: host.name.clone(),
+                        host_user: host.user.clone(),
+                        endpoints: host.endpoints.clone(),
+                        selected: preferred,
+                    });
+                } else {
+                    let endpoint = host
+                        .endpoints
+                        .first()
+                        .map(|e| format!("{}:{}", e.host, e.port))
+                        .unwrap_or_else(|| "n/a".to_string());
+                    let title = format!("{} - {}@{}", host.name, host.user, endpoint);
+                    let rows_cols = crossterm::terminal::size().unwrap_or((120, 40));
+                    let rows = rows_cols.1;
+                    let cols = rows_cols.0;
+                    state.ssh_tabs.push(SshSessionState::new_starting(
+                        title,
+                        rows,
+                        cols,
+                        host.id,
+                        Some(0),
+                    ));
+                    let idx = state.ssh_tabs.len().saturating_sub(1);
+                    state.active_ssh_tab = Some(idx);
+                    state.active_page = DashboardPage::Ssh;
+                }
             }
         }
         _ => {}
