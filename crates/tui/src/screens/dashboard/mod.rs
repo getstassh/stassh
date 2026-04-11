@@ -32,7 +32,8 @@ use crate::{
 
 mod pages;
 
-const HOST_PROBE_INTERVAL: Duration = Duration::from_secs(20);
+const HOST_PROBE_INTERVAL: Duration = Duration::from_secs(5);
+const HOST_PROBE_TIMEOUT_CAP: Duration = Duration::from_secs(2);
 
 pub(crate) static HANDLER: ScreenHandler<DashboardState> = ScreenHandler {
     matches: |s| matches!(s, Screen::Dashboard { .. }),
@@ -170,7 +171,8 @@ fn sync_host_status_maps(app: &AppState, state: &mut DashboardState) {
 }
 
 fn start_probe_round(app: &AppState, state: &mut DashboardState) {
-    let timeout = Duration::from_secs(app.config.ssh_connect_timeout_seconds.max(1));
+    let timeout = Duration::from_secs(app.config.ssh_connect_timeout_seconds.max(1))
+        .min(HOST_PROBE_TIMEOUT_CAP);
 
     for host in &app.db.hosts {
         if state.probe_tasks.iter().any(|task| task.host_id == host.id) {
@@ -374,6 +376,7 @@ fn save_modal(
     Some(Box::new(move |app| {
         match mode {
             HostModalMode::Create => {
+                let status_len = endpoints.len();
                 let id = app.db.next_host_id.max(1);
                 app.db.next_host_id = id.saturating_add(1);
                 app.db.hosts.push(SshHost {
@@ -385,18 +388,31 @@ fn save_modal(
                 });
                 if let Screen::Dashboard { state } = &mut app.screen {
                     state.selected_host = create_selected_index;
+                    state
+                        .host_statuses
+                        .insert(id, vec![HostConnectionStatus::Unknown; status_len]);
+                    state.needs_initial_probe = true;
                 }
             }
             HostModalMode::Edit { host_id } => {
+                let mut updated_endpoints_len = None;
                 if let Some(existing) = app.db.hosts.iter_mut().find(|h| h.id == host_id) {
                     existing.name = name;
                     existing.user = user;
                     existing.endpoints = endpoints;
                     existing.auth = auth;
+                    updated_endpoints_len = Some(existing.endpoints.len());
                 }
                 let max_selected = app.db.hosts.len().saturating_sub(1);
                 if let Screen::Dashboard { state } = &mut app.screen {
                     state.selected_host = selected_host.min(max_selected);
+                    if let Some(updated_endpoints_len) = updated_endpoints_len {
+                        state.host_statuses.insert(
+                            host_id,
+                            vec![HostConnectionStatus::Unknown; updated_endpoints_len],
+                        );
+                    }
+                    state.needs_initial_probe = true;
                 }
             }
         }
