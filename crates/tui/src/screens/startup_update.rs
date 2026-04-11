@@ -119,8 +119,14 @@ fn ui(frame: &mut Frame, _app: &backend::AppState, state: &StartupUpdateState) {
                 Gauge::default()
                     .ratio(ratio)
                     .label(match state.total {
-                        Some(total) => format!("{} / {} bytes", state.downloaded, total),
-                        None => format!("{} bytes downloaded", state.downloaded),
+                        Some(total) => {
+                            format!(
+                                "{} / {}",
+                                format_bytes(state.downloaded),
+                                format_bytes(total)
+                            )
+                        }
+                        None => format!("{} downloaded", format_bytes(state.downloaded)),
                     })
                     .style(success_text()),
                 split[1],
@@ -169,5 +175,27 @@ fn ui(frame: &mut Frame, _app: &backend::AppState, state: &StartupUpdateState) {
                 split[2],
             );
         }
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+
+    let mut value = bytes as f64;
+    let mut unit_index = 0usize;
+
+    while value >= 1024.0 && unit_index < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit_index += 1;
+    }
+
+    if unit_index == 0 {
+        format!("{} {}", bytes, UNITS[unit_index])
+    } else if value >= 100.0 {
+        format!("{value:.0} {}", UNITS[unit_index])
+    } else if value >= 10.0 {
+        format!("{value:.1} {}", UNITS[unit_index])
+    } else {
+        format!("{value:.2} {}", UNITS[unit_index])
     }
 }
