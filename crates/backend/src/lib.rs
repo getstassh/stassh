@@ -14,7 +14,10 @@ pub use crate::update::{
 };
 pub use crate::version::{VersionCheckStatus, check_for_updates};
 
-use crate::db::{load_state, rekey_database, save_config_only, save_state};
+use crate::db::{
+    automatic_backup_retention_count, backup_count, load_state, maybe_create_automatic_backup,
+    rekey_database, save_config_only, save_state,
+};
 
 use anyhow::Result;
 
@@ -59,6 +62,7 @@ impl AppState {
             .clone()
             .unwrap_or(DbEncryption::None);
         save_state(&self.db, &self.config, encryption, self.password.as_deref())?;
+        let _ = maybe_create_automatic_backup(self.password.as_deref());
         Ok(())
     }
 
@@ -77,6 +81,14 @@ impl AppState {
 
     pub fn db_open_status(&self) -> DbOpenStatus {
         db::db_open_status().unwrap_or(DbOpenStatus::Missing)
+    }
+
+    pub fn backup_count(&self) -> Option<usize> {
+        backup_count().ok()
+    }
+
+    pub fn automatic_backup_retention_count(&self) -> usize {
+        automatic_backup_retention_count()
     }
 
     pub fn enable_encryption_with_passphrase(&mut self, new_passphrase: &str) -> Result<()> {

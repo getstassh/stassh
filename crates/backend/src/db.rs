@@ -1,5 +1,6 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
@@ -7,6 +8,12 @@ use rusqlite::{Connection, Error as SqlError, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::{Config, sql_migrations};
+
+const BACKUP_DIR_NAME: &str = "backups";
+const BACKUP_FILE_PREFIX: &str = "db-backup-";
+const BACKUP_FILE_SUFFIX: &str = ".sqlite";
+const AUTO_BACKUP_INTERVAL_MS: u64 = 24 * 60 * 60 * 1000;
+const AUTO_BACKUP_RETENTION_COUNT: usize = 14;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum DbEncryption {
@@ -82,11 +89,148 @@ fn db_path() -> Result<PathBuf> {
     Ok(dir.join("db.sqlite"))
 }
 
+fn backup_dir_path() -> Result<PathBuf> {
+    let dirs = project_dirs()?;
+    let dir = dirs.data_dir().join(BACKUP_DIR_NAME);
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+fn backup_file_name(timestamp_unix_ms: u64) -> String {
+    format!("{BACKUP_FILE_PREFIX}{timestamp_unix_ms:013}{BACKUP_FILE_SUFFIX}")
+}
+
+fn parse_backup_timestamp(file_name: &str) -> Option<u64> {
+    file_name
+        .strip_prefix(BACKUP_FILE_PREFIX)?
+        .strip_suffix(BACKUP_FILE_SUFFIX)?
+        .parse::<u64>()
+        .ok()
+}
+
+fn list_backup_files() -> Result<Vec<(u64, PathBuf)>> {
+    let dir = backup_dir_path()?;
+    let mut backups = Vec::new();
+
+    for entry in fs::read_dir(&dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+
+        let Some(timestamp) = parse_backup_timestamp(file_name) else {
+            continue;
+        };
+
+        backups.push((timestamp, path));
+    }
+
+    backups.sort_by(|a, b| b.0.cmp(&a.0));
+    Ok(backups)
+}
+
+fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis() as u64)
+}
+
 pub(crate) fn delete_db() -> Result<()> {
     let path = db_path()?;
     if path.exists() {
         fs::remove_file(path)?;
     }
+    Ok(())
+}
+
+pub(crate) fn maybe_create_automatic_backup(passphrase: Option<&str>) -> Result<()> {
+    let path = db_path()?;
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let now = now_unix_ms();
+    let existing = list_backup_files()?;
+    if let Some((latest_timestamp, _)) = existing.first()
+        && now.saturating_sub(*latest_timestamp) < AUTO_BACKUP_INTERVAL_MS
+    {
+        return Ok(());
+    }
+
+    let backup_dir = backup_dir_path()?;
+    let timestamp = now;
+    let final_path = backup_dir.join(backup_file_name(timestamp));
+    let temp_path = backup_dir.join(format!("{}.tmp", backup_file_name(timestamp)));
+
+    if temp_path.exists() {
+        let _ = fs::remove_file(&temp_path);
+    }
+
+    export_backup_to_path(passphrase, &temp_path)?;
+    fs::rename(&temp_path, &final_path).with_context(|| {
+        format!(
+            "failed to finalize backup {}",
+            final_path.as_path().display()
+        )
+    })?;
+
+    prune_old_backups(AUTO_BACKUP_RETENTION_COUNT)?;
+    Ok(())
+}
+
+pub(crate) fn backup_count() -> Result<usize> {
+    Ok(list_backup_files()?.len())
+}
+
+pub(crate) fn automatic_backup_retention_count() -> usize {
+    AUTO_BACKUP_RETENTION_COUNT
+}
+
+fn prune_old_backups(retain_count: usize) -> Result<()> {
+    let backups = list_backup_files()?;
+    for (_, path) in backups.into_iter().skip(retain_count) {
+        fs::remove_file(&path)
+            .with_context(|| format!("failed to remove old backup {}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn export_backup_to_path(passphrase: Option<&str>, backup_path: &Path) -> Result<()> {
+    let source_path = db_path()?;
+    let conn = Connection::open(&source_path)
+        .with_context(|| format!("failed to open database {}", source_path.display()))?;
+    configure_sqlcipher_logging(&conn);
+
+    if let Some(passphrase) = passphrase {
+        apply_sqlcipher_key(&conn, passphrase)?;
+    }
+
+    validate_connection(&conn)?;
+
+    if backup_path.exists() {
+        fs::remove_file(backup_path)
+            .with_context(|| format!("failed to replace backup {}", backup_path.display()))?;
+    }
+
+    let escaped_backup_path = backup_path.to_string_lossy().replace('\'', "''");
+    let escaped_passphrase = passphrase.unwrap_or_default().replace('\'', "''");
+
+    let export_sql = format!(
+        "ATTACH DATABASE '{escaped_backup_path}' AS backup KEY '{escaped_passphrase}';\
+         SELECT sqlcipher_export('backup');\
+         DETACH DATABASE backup;"
+    );
+
+    if let Err(err) = conn.execute_batch(&export_sql).map_err(map_sql_error) {
+        let _ = fs::remove_file(backup_path);
+        return Err(err);
+    }
+
     Ok(())
 }
 

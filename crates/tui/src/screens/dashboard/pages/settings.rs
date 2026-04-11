@@ -1,10 +1,10 @@
 use backend::{AppState, DbEncryption, VersionCheckStatus};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
+    Frame,
 };
 
 use crate::{
@@ -153,6 +153,20 @@ fn render_info_panel(frame: &mut Frame, area: Rect, app: &AppState) {
         Line::from(vec![
             Span::styled("Database encryption: ", muted_text()),
             Span::styled(encryption_mode, text()),
+        ]),
+        Line::from(vec![
+            Span::styled("Database backups: ", muted_text()),
+            Span::styled(
+                match app.backup_count() {
+                    Some(count) => format!(
+                        "{} (auto, keep {})",
+                        count,
+                        app.automatic_backup_retention_count()
+                    ),
+                    None => "unknown (auto, keep 14)".to_string(),
+                },
+                text(),
+            ),
         ]),
         Line::from(vec![
             Span::styled("App version: ", muted_text()),
