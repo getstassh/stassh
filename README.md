@@ -5,7 +5,7 @@
 Stassh is a local-first SSH command deck for your terminal.
 Manage hosts, check reachability, verify host keys, and jump into live SSH sessions from one TUI.
 
-![Stassh overview](/combined.png)
+![Stassh overview](/stassh.gif)
 
 ## Features
 
