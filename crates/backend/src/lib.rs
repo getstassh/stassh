@@ -15,8 +15,9 @@ pub use crate::update::{
 pub use crate::version::{VersionCheckStatus, check_for_updates};
 
 use crate::db::{
-    automatic_backup_retention_count, backup_count, load_state, maybe_create_automatic_backup,
-    rekey_database, save_config_only, save_state,
+    automatic_backup_retention_count, backup_count, export_db_blob, inspect_db_blob_open_status,
+    load_state, maybe_create_automatic_backup, rekey_database, restore_db_from_blob,
+    save_config_only, save_state, validate_db_blob_passphrase,
 };
 
 use anyhow::Result;
@@ -89,6 +90,28 @@ impl AppState {
 
     pub fn automatic_backup_retention_count(&self) -> usize {
         automatic_backup_retention_count()
+    }
+
+    pub fn export_db_blob(&self) -> Result<Vec<u8>> {
+        export_db_blob()
+    }
+
+    pub fn inspect_db_blob_open_status(&self, blob: &[u8]) -> Result<DbOpenStatus> {
+        inspect_db_blob_open_status(blob)
+    }
+
+    pub fn validate_db_blob_passphrase(&self, blob: &[u8], passphrase: &str) -> Result<()> {
+        validate_db_blob_passphrase(blob, passphrase)
+    }
+
+    pub fn restore_db_from_blob(&mut self, blob: &[u8], passphrase: Option<&str>) -> Result<()> {
+        let status = restore_db_from_blob(blob, passphrase)?;
+        self.password = if status == DbOpenStatus::PassphraseRequired {
+            passphrase.map(|value| value.to_string())
+        } else {
+            None
+        };
+        self.load_db()
     }
 
     pub fn enable_encryption_with_passphrase(&mut self, new_passphrase: &str) -> Result<()> {

@@ -189,6 +189,141 @@ pub(crate) fn backup_count() -> Result<usize> {
     Ok(list_backup_files()?.len())
 }
 
+pub(crate) fn export_db_blob() -> Result<Vec<u8>> {
+    let path = db_path()?;
+    fs::read(&path).with_context(|| format!("failed to read database {}", path.display()))
+}
+
+pub(crate) fn inspect_db_blob_open_status(blob: &[u8]) -> Result<DbOpenStatus> {
+    if blob.is_empty() {
+        anyhow::bail!("backup blob is empty")
+    }
+
+    let target_path = db_path()?;
+    let temp_path = target_path.with_extension("sqlite.restore_inspect_tmp");
+
+    if temp_path.exists() {
+        let _ = fs::remove_file(&temp_path);
+    }
+
+    fs::write(&temp_path, blob).with_context(|| {
+        format!(
+            "failed to write temporary restore file {}",
+            temp_path.display()
+        )
+    })?;
+
+    let status = inspect_database_open_status_at_path(&temp_path)
+        .map_err(|err| anyhow::anyhow!("invalid backup blob: {err}"));
+
+    let _ = fs::remove_file(&temp_path);
+    status
+}
+
+pub(crate) fn validate_db_blob_passphrase(blob: &[u8], passphrase: &str) -> Result<()> {
+    if blob.is_empty() {
+        anyhow::bail!("backup blob is empty")
+    }
+    if passphrase.trim().is_empty() {
+        anyhow::bail!("backup database passphrase is required")
+    }
+
+    let target_path = db_path()?;
+    let temp_path = target_path.with_extension("sqlite.restore_passphrase_tmp");
+
+    if temp_path.exists() {
+        let _ = fs::remove_file(&temp_path);
+    }
+
+    fs::write(&temp_path, blob).with_context(|| {
+        format!(
+            "failed to write temporary restore file {}",
+            temp_path.display()
+        )
+    })?;
+
+    let result = validate_connection_at_path(&temp_path, Some(passphrase)).map_err(|err| {
+        if is_wrong_passphrase_error(&err) {
+            anyhow::anyhow!("incorrect passphrase for backup database")
+        } else {
+            err
+        }
+    });
+
+    let _ = fs::remove_file(&temp_path);
+    result
+}
+
+pub(crate) fn restore_db_from_blob(blob: &[u8], passphrase: Option<&str>) -> Result<DbOpenStatus> {
+    if blob.is_empty() {
+        anyhow::bail!("backup blob is empty")
+    }
+
+    let path = db_path()?;
+    let tmp_path = path.with_extension("sqlite.restore_tmp");
+
+    if tmp_path.exists() {
+        let _ = fs::remove_file(&tmp_path);
+    }
+
+    fs::write(&tmp_path, blob).with_context(|| {
+        format!(
+            "failed to write temporary restore file {}",
+            tmp_path.display()
+        )
+    })?;
+
+    let status = match inspect_database_open_status_at_path(&tmp_path) {
+        Ok(status) => status,
+        Err(err) => {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(anyhow::anyhow!("invalid backup blob: {err}"));
+        }
+    };
+
+    let normalized_passphrase = passphrase.filter(|value| !value.trim().is_empty());
+
+    if status == DbOpenStatus::PassphraseRequired {
+        let Some(passphrase) = normalized_passphrase else {
+            let _ = fs::remove_file(&tmp_path);
+            anyhow::bail!("backup database is encrypted; passphrase is required")
+        };
+
+        if let Err(err) = validate_connection_at_path(&tmp_path, Some(passphrase)) {
+            let _ = fs::remove_file(&tmp_path);
+            if is_wrong_passphrase_error(&err) {
+                anyhow::bail!("incorrect passphrase for backup database")
+            }
+            return Err(err);
+        }
+    } else if let Err(err) = validate_connection_at_path(&tmp_path, None) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(err);
+    }
+
+    if path.exists() {
+        if let Err(err) = replace_database_file(&path, &tmp_path) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(err);
+        }
+    } else if let Err(err) = fs::rename(&tmp_path, &path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(anyhow::anyhow!(
+            "failed to move restored database into place {}: {}",
+            path.display(),
+            err
+        ));
+    }
+
+    if status == DbOpenStatus::PassphraseRequired {
+        validate_connection_at_path(&path, normalized_passphrase)?;
+    } else {
+        validate_connection_at_path(&path, None)?;
+    }
+
+    Ok(status)
+}
+
 pub(crate) fn automatic_backup_retention_count() -> usize {
     AUTO_BACKUP_RETENTION_COUNT
 }
@@ -372,6 +507,30 @@ fn open_connection(passphrase: Option<&str>) -> Result<Connection> {
     validate_connection(&conn)?;
     sql_migrations::apply(&conn)?;
     Ok(conn)
+}
+
+fn inspect_database_open_status_at_path(path: &Path) -> Result<DbOpenStatus> {
+    let conn = Connection::open(path)
+        .with_context(|| format!("failed to open database {}", path.display()))?;
+    configure_sqlcipher_logging(&conn);
+
+    match validate_connection(&conn) {
+        Ok(()) => Ok(DbOpenStatus::Plain),
+        Err(err) if is_wrong_passphrase_error(&err) => Ok(DbOpenStatus::PassphraseRequired),
+        Err(err) => Err(err),
+    }
+}
+
+fn validate_connection_at_path(path: &Path, passphrase: Option<&str>) -> Result<()> {
+    let conn = Connection::open(path)
+        .with_context(|| format!("failed to open database {}", path.display()))?;
+    configure_sqlcipher_logging(&conn);
+
+    if let Some(passphrase) = passphrase {
+        apply_sqlcipher_key(&conn, passphrase)?;
+    }
+
+    validate_connection(&conn)
 }
 
 fn validate_connection(conn: &Connection) -> Result<()> {

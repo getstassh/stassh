@@ -134,6 +134,7 @@ pub(crate) struct DashboardState {
     pub(crate) active_ssh_tab: Option<usize>,
     pub(crate) settings_selected_row: usize,
     pub(crate) settings_modal: Option<SettingsSecurityModalState>,
+    pub(crate) settings_backup_modal: Option<SettingsBackupModalState>,
     pub(crate) update_prompt: Option<DashboardUpdatePromptState>,
 }
 
@@ -171,6 +172,58 @@ pub(crate) struct SettingsSecurityModalState {
     pub(crate) confirm_passphrase: StringState,
     pub(crate) danger_confirm: YesNoState,
     pub(crate) error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsBackupAction {
+    CopyDbBlob,
+    RestoreDbBlob,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsBackupField {
+    Blob,
+    Passphrase,
+    DangerConfirm,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsBackupRestoreStage {
+    Blob,
+    Passphrase,
+    Confirm,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SettingsBackupModalState {
+    pub(crate) action: SettingsBackupAction,
+    pub(crate) focus: SettingsBackupField,
+    pub(crate) restore_stage: SettingsBackupRestoreStage,
+    pub(crate) blob: StringState,
+    pub(crate) passphrase: StringState,
+    pub(crate) danger_confirm: YesNoState,
+    pub(crate) requires_passphrase: bool,
+    pub(crate) copy_feedback: Option<String>,
+    pub(crate) error: Option<String>,
+}
+
+impl SettingsBackupModalState {
+    pub(crate) fn for_action(action: SettingsBackupAction) -> Self {
+        let mut blob = StringState::invisible();
+        blob.is_visible = true;
+
+        Self {
+            action,
+            focus: SettingsBackupField::Blob,
+            restore_stage: SettingsBackupRestoreStage::Blob,
+            blob,
+            passphrase: StringState::invisible(),
+            danger_confirm: YesNoState { selected: false },
+            requires_passphrase: false,
+            copy_feedback: None,
+            error: None,
+        }
+    }
 }
 
 impl SettingsSecurityModalState {
@@ -229,6 +282,7 @@ impl DashboardState {
             active_ssh_tab: None,
             settings_selected_row: 0,
             settings_modal: None,
+            settings_backup_modal: None,
             update_prompt: None,
         }
     }

@@ -1,22 +1,25 @@
-use backend::{AppState, DbEncryption, VersionCheckStatus};
+use backend::{AppState, DbEncryption, DbOpenStatus, VersionCheckStatus};
+use base64::Engine;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
+use std::io::{self, Write};
 
 use crate::{
     inputs::{handle_pasted_text, handle_text_input, handle_yes_no_input},
     navigation::{
-        DashboardState, Screen, SettingsSecurityAction, SettingsSecurityField,
-        SettingsSecurityModalState,
+        DashboardState, Screen, SettingsBackupAction, SettingsBackupField,
+        SettingsBackupModalState, SettingsBackupRestoreStage, SettingsSecurityAction,
+        SettingsSecurityField, SettingsSecurityModalState,
     },
     screens::AppEffect,
     ui::{
         accent_text, border, centered_rect_no_border, danger_text, line_with_caret, modal_block,
-        muted_text, selected_border, soft_accent_text, text,
+        muted_text, panel_alt_background, selected_border, soft_accent_text, text,
     },
 };
 
@@ -32,6 +35,8 @@ enum SettingsRow {
     EnableEncryption,
     ChangePassphrase,
     RemovePassphrase,
+    CopyDbBlob,
+    RestoreDbBlob,
 }
 
 pub(crate) fn handle_key(
@@ -39,6 +44,10 @@ pub(crate) fn handle_key(
     key: KeyEvent,
     state: &mut DashboardState,
 ) -> Option<AppEffect> {
+    if let Some(modal) = &mut state.settings_backup_modal {
+        return handle_backup_modal_key(key, modal);
+    }
+
     if let Some(modal) = &mut state.settings_modal {
         return handle_modal_key(key, modal);
     }
@@ -79,26 +88,49 @@ pub(crate) fn handle_key(
 }
 
 pub(crate) fn handle_paste(text: &str, state: &mut DashboardState) {
-    let Some(modal) = &mut state.settings_modal else {
+    let Some(modal) = &mut state.settings_backup_modal else {
+        let Some(modal) = &mut state.settings_modal else {
+            return;
+        };
+
+        match modal.focus {
+            SettingsSecurityField::Current => {
+                handle_pasted_text(&mut modal.current_passphrase, text)
+            }
+            SettingsSecurityField::New => handle_pasted_text(&mut modal.new_passphrase, text),
+            SettingsSecurityField::Confirm => {
+                handle_pasted_text(&mut modal.confirm_passphrase, text)
+            }
+            SettingsSecurityField::DangerConfirm => {}
+        }
         return;
     };
 
-    match modal.focus {
-        SettingsSecurityField::Current => handle_pasted_text(&mut modal.current_passphrase, text),
-        SettingsSecurityField::New => handle_pasted_text(&mut modal.new_passphrase, text),
-        SettingsSecurityField::Confirm => handle_pasted_text(&mut modal.confirm_passphrase, text),
-        SettingsSecurityField::DangerConfirm => {}
+    match modal.action {
+        SettingsBackupAction::CopyDbBlob => {}
+        SettingsBackupAction::RestoreDbBlob => match modal.restore_stage {
+            SettingsBackupRestoreStage::Blob => handle_pasted_text(&mut modal.blob, text),
+            SettingsBackupRestoreStage::Passphrase => {
+                handle_pasted_text(&mut modal.passphrase, text)
+            }
+            SettingsBackupRestoreStage::Confirm => {}
+        },
     }
 }
 
 pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &DashboardState) {
     let split = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(11), Constraint::Min(6)])
+        .constraints([Constraint::Length(13), Constraint::Min(6)])
         .split(area);
 
     render_controls_panel(frame, split[0], app, state);
     render_info_panel(frame, split[1], app);
+
+    if let Some(modal) = &state.settings_backup_modal {
+        render_backup_modal(frame, frame.area(), modal, app);
+        return;
+    }
 
     if let Some(modal) = &state.settings_modal {
         render_security_modal(frame, frame.area(), modal);
@@ -106,6 +138,23 @@ pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &Dash
 }
 
 pub(crate) fn footer_hint(state: &DashboardState) -> &'static str {
+    if let Some(modal) = &state.settings_backup_modal {
+        return match modal.action {
+            SettingsBackupAction::CopyDbBlob => "Press C to copy | Esc/Enter close",
+            SettingsBackupAction::RestoreDbBlob => match modal.restore_stage {
+                SettingsBackupRestoreStage::Blob => {
+                    "Paste backup blob | Enter continue | Esc cancel"
+                }
+                SettingsBackupRestoreStage::Passphrase => {
+                    "Enter backup passphrase | Enter verify | Esc cancel"
+                }
+                SettingsBackupRestoreStage::Confirm => {
+                    "Left/Right choose NO/YES | Enter restore | Esc cancel"
+                }
+            },
+        };
+    }
+
     if state.settings_modal.is_some() {
         return "Tab move | Enter submit/next | Left/Right confirm | Esc cancel";
     }
@@ -207,6 +256,12 @@ fn render_row_label(row: SettingsRow, app: &AppState, selected: bool) -> Line<'s
         SettingsRow::EnableEncryption => ("Enable DB passphrase", "open modal".to_string(), true),
         SettingsRow::ChangePassphrase => ("Change DB passphrase", "open modal".to_string(), true),
         SettingsRow::RemovePassphrase => ("Remove DB passphrase", "open modal".to_string(), true),
+        SettingsRow::CopyDbBlob => ("Create DB backup blob", "open modal".to_string(), true),
+        SettingsRow::RestoreDbBlob => (
+            "Restore DB from backup blob",
+            "open modal".to_string(),
+            true,
+        ),
     };
 
     let value_style = if action_like {
@@ -246,6 +301,9 @@ fn build_rows(app: &AppState) -> Vec<SettingsRow> {
         }
         _ => rows.push(SettingsRow::EnableEncryption),
     }
+
+    rows.push(SettingsRow::CopyDbBlob);
+    rows.push(SettingsRow::RestoreDbBlob);
 
     rows
 }
@@ -302,7 +360,181 @@ fn apply_row_change(row: SettingsRow, positive: bool) -> Option<AppEffect> {
                 ));
             }
         })),
+        SettingsRow::CopyDbBlob => Some(Box::new(|app| {
+            let result = app.export_db_blob();
+            if let Screen::Dashboard { state } = &mut app.screen {
+                match result {
+                    Ok(blob) => {
+                        let mut modal =
+                            SettingsBackupModalState::for_action(SettingsBackupAction::CopyDbBlob);
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(blob);
+                        modal.blob.text = wrap_token_for_display(&encoded, 96);
+                        modal.blob.caret_position = modal.blob.text.len();
+                        state.settings_backup_modal = Some(modal);
+                    }
+                    Err(err) => {
+                        state.last_status = Some(format!("Failed to create backup blob: {}", err));
+                    }
+                }
+            }
+        })),
+        SettingsRow::RestoreDbBlob => Some(Box::new(|app| {
+            if let Screen::Dashboard { state } = &mut app.screen {
+                state.settings_backup_modal = Some(SettingsBackupModalState::for_action(
+                    SettingsBackupAction::RestoreDbBlob,
+                ));
+            }
+        })),
     }
+}
+
+fn handle_backup_modal_key(
+    key: KeyEvent,
+    modal: &mut SettingsBackupModalState,
+) -> Option<AppEffect> {
+    if key.code == KeyCode::Esc {
+        return Some(Box::new(|app| {
+            if let Screen::Dashboard { state } = &mut app.screen {
+                state.settings_backup_modal = None;
+            }
+        }));
+    }
+
+    match modal.action {
+        SettingsBackupAction::CopyDbBlob => {
+            if key.code == KeyCode::Char('c') {
+                let token = modal.blob.text.clone();
+                return Some(Box::new(move |app| {
+                    let result = copy_text_to_clipboard_osc52(&token);
+                    if let Screen::Dashboard { state } = &mut app.screen {
+                        if let Some(modal) = &mut state.settings_backup_modal {
+                            modal.copy_feedback = match result {
+                                Ok(()) => Some("Copied to clipboard".to_string()),
+                                Err(err) => Some(format!("Copy failed: {}", err)),
+                            };
+                        }
+                    }
+                }));
+            }
+
+            if key.code == KeyCode::Enter {
+                return Some(Box::new(|app| {
+                    if let Screen::Dashboard { state } = &mut app.screen {
+                        state.settings_backup_modal = None;
+                    }
+                }));
+            }
+            None
+        }
+        SettingsBackupAction::RestoreDbBlob => {
+            match modal.restore_stage {
+                SettingsBackupRestoreStage::Blob => {
+                    if key.code == KeyCode::Enter {
+                        return advance_restore_stage(modal.clone());
+                    }
+                    let _ = handle_text_input(&mut modal.blob, key);
+                    modal.error = None;
+                }
+                SettingsBackupRestoreStage::Passphrase => {
+                    if key.code == KeyCode::Enter {
+                        return advance_restore_stage(modal.clone());
+                    }
+                    let _ = handle_text_input(&mut modal.passphrase, key);
+                    modal.error = None;
+                }
+                SettingsBackupRestoreStage::Confirm => {
+                    let _ = handle_yes_no_input(&mut modal.danger_confirm, key.code);
+                    if key.code == KeyCode::Enter {
+                        return advance_restore_stage(modal.clone());
+                    }
+                    modal.error = None;
+                }
+            }
+            None
+        }
+    }
+}
+
+fn advance_restore_stage(modal: SettingsBackupModalState) -> Option<AppEffect> {
+    let blob_token = modal.blob.text.clone();
+    let passphrase = modal.passphrase.text.clone();
+    let confirmed = modal.danger_confirm.is_yes();
+    let stage = modal.restore_stage;
+
+    Some(Box::new(move |app| {
+        let mut next = modal.clone();
+        next.error = None;
+
+        let result = (|| -> anyhow::Result<()> {
+            let token = compact_token(&blob_token);
+            if token.is_empty() {
+                anyhow::bail!("Backup blob cannot be empty");
+            }
+
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(token)
+                .map_err(|_| anyhow::anyhow!("Backup blob is not valid base64"))?;
+
+            match stage {
+                SettingsBackupRestoreStage::Blob => {
+                    let blob_status = app.inspect_db_blob_open_status(&decoded)?;
+                    next.requires_passphrase = blob_status == DbOpenStatus::PassphraseRequired;
+                    next.restore_stage = if next.requires_passphrase {
+                        SettingsBackupRestoreStage::Passphrase
+                    } else {
+                        SettingsBackupRestoreStage::Confirm
+                    };
+                    next.focus = if next.requires_passphrase {
+                        SettingsBackupField::Passphrase
+                    } else {
+                        SettingsBackupField::DangerConfirm
+                    };
+                    next.danger_confirm.selected = false;
+                }
+                SettingsBackupRestoreStage::Passphrase => {
+                    if passphrase.trim().is_empty() {
+                        anyhow::bail!("Backup is encrypted. Enter its passphrase to continue");
+                    }
+                    app.validate_db_blob_passphrase(&decoded, &passphrase)?;
+                    next.restore_stage = SettingsBackupRestoreStage::Confirm;
+                    next.focus = SettingsBackupField::DangerConfirm;
+                    next.danger_confirm.selected = false;
+                }
+                SettingsBackupRestoreStage::Confirm => {
+                    if !confirmed {
+                        anyhow::bail!("Set confirmation to YES to restore");
+                    }
+
+                    if next.requires_passphrase {
+                        app.restore_db_from_blob(&decoded, Some(passphrase.as_str()))?;
+                    } else {
+                        app.restore_db_from_blob(&decoded, None)?;
+                    }
+                }
+            }
+
+            Ok(())
+        })();
+
+        if let Screen::Dashboard { state } = &mut app.screen {
+            match result {
+                Ok(()) => {
+                    if stage == SettingsBackupRestoreStage::Confirm {
+                        state.settings_backup_modal = None;
+                        state.last_status =
+                            Some("Database restored from backup blob. Restarting...".to_string());
+                        app.request_restart_and_exit();
+                    } else {
+                        state.settings_backup_modal = Some(next);
+                    }
+                }
+                Err(err) => {
+                    next.error = Some(err.to_string());
+                    state.settings_backup_modal = Some(next);
+                }
+            }
+        }
+    }))
 }
 
 fn handle_modal_key(key: KeyEvent, modal: &mut SettingsSecurityModalState) -> Option<AppEffect> {
@@ -474,6 +706,278 @@ fn active_fields(action: SettingsSecurityAction) -> &'static [SettingsSecurityFi
     }
 }
 
+fn render_backup_modal(
+    frame: &mut Frame,
+    app_area: Rect,
+    modal: &SettingsBackupModalState,
+    app: &AppState,
+) {
+    match modal.action {
+        SettingsBackupAction::CopyDbBlob => {
+            let popup_area =
+                centered_rect_no_border((app_area.width.saturating_sub(6)).min(110), 18, app_area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = modal_block("DB backup blob", "Press C to copy | Enter/Esc close");
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Min(8),
+                ])
+                .split(inner);
+
+            frame.render_widget(
+                Paragraph::new("This token is a full snapshot of your database. Keep it private.")
+                    .style(muted_text()),
+                rows[0],
+            );
+
+            let password_note =
+                if matches!(app.config.db_encryption, Some(DbEncryption::Passphrase)) {
+                    "Your DB is encrypted. Remember the current DB password for restore."
+                } else {
+                    "If you later enable DB encryption, remember the password used for that backup."
+                };
+            frame.render_widget(Paragraph::new(password_note).style(muted_text()), rows[1]);
+            frame.render_widget(
+                Paragraph::new("Anyone with this token can restore your DB contents.")
+                    .style(danger_text()),
+                rows[2],
+            );
+
+            let copy_feedback = modal.copy_feedback.as_deref().unwrap_or("Not copied yet");
+            let copy_style = if copy_feedback.starts_with("Copied") {
+                crate::ui::success_text()
+            } else if copy_feedback.starts_with("Copy failed") {
+                danger_text()
+            } else {
+                muted_text()
+            };
+            frame.render_widget(
+                Paragraph::new(format!("Copy status: {copy_feedback}")).style(copy_style),
+                rows[3],
+            );
+
+            let blob_block = Block::default()
+                .title(Span::styled(" Backup blob (base64) ", accent_text()))
+                .borders(Borders::ALL)
+                .border_style(border());
+            let blob_inner = blob_block.inner(rows[4]);
+            frame.render_widget(blob_block, rows[4]);
+            frame.render_widget(
+                Paragraph::new(modal.blob.text.clone())
+                    .style(text())
+                    .wrap(Wrap { trim: false }),
+                blob_inner,
+            );
+        }
+        SettingsBackupAction::RestoreDbBlob => {
+            let popup_area =
+                centered_rect_no_border((app_area.width.saturating_sub(8)).min(96), 20, app_area);
+            frame.render_widget(Clear, popup_area);
+
+            let footer = match modal.restore_stage {
+                SettingsBackupRestoreStage::Blob => "Step 1/3: paste blob, then Enter | Esc cancel",
+                SettingsBackupRestoreStage::Passphrase => {
+                    "Step 2/3: enter passphrase, then Enter | Esc cancel"
+                }
+                SettingsBackupRestoreStage::Confirm => {
+                    "Step 3/3: choose YES/NO, then Enter | Esc cancel"
+                }
+            };
+            let block = modal_block("Restore DB from backup blob", footer);
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            match modal.restore_stage {
+                SettingsBackupRestoreStage::Blob => {
+                    let rows = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Length(2),
+                            Constraint::Min(10),
+                            Constraint::Length(1),
+                        ])
+                        .split(inner);
+
+                    frame.render_widget(
+                        Paragraph::new("Paste your backup blob token to continue.")
+                            .style(muted_text()),
+                        rows[0],
+                    );
+
+                    render_blob_input(
+                        frame,
+                        rows[1],
+                        &modal.blob,
+                        modal.focus == SettingsBackupField::Blob,
+                    );
+
+                    if let Some(error) = &modal.error {
+                        frame.render_widget(
+                            Paragraph::new(error.clone()).style(danger_text()),
+                            rows[2],
+                        );
+                    }
+                }
+                SettingsBackupRestoreStage::Passphrase => {
+                    let rows = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Length(2),
+                            Constraint::Length(3),
+                            Constraint::Length(1),
+                            Constraint::Min(0),
+                        ])
+                        .split(inner);
+
+                    frame.render_widget(
+                        Paragraph::new(
+                            "Backup is encrypted. Enter the backup passphrase to verify it.",
+                        )
+                        .style(muted_text()),
+                        rows[0],
+                    );
+
+                    render_password_prompt_input(
+                        frame,
+                        rows[1],
+                        &modal.passphrase,
+                        modal.focus == SettingsBackupField::Passphrase,
+                    );
+
+                    if let Some(error) = &modal.error {
+                        frame.render_widget(
+                            Paragraph::new(error.clone()).style(danger_text()),
+                            rows[2],
+                        );
+                    }
+                }
+                SettingsBackupRestoreStage::Confirm => {
+                    let rows = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Length(2),
+                            Constraint::Length(3),
+                            Constraint::Length(1),
+                            Constraint::Min(0),
+                        ])
+                        .split(inner);
+
+                    frame.render_widget(
+                        Paragraph::new(
+                            "Ready to restore. This overwrites your current DB and restarts Stassh.",
+                        )
+                        .style(muted_text()),
+                        rows[0],
+                    );
+
+                    render_restore_confirm_toggle(
+                        frame,
+                        rows[1],
+                        modal.danger_confirm.is_yes(),
+                        modal.focus == SettingsBackupField::DangerConfirm,
+                    );
+
+                    if let Some(error) = &modal.error {
+                        frame.render_widget(
+                            Paragraph::new(error.clone()).style(danger_text()),
+                            rows[2],
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn render_blob_input(
+    frame: &mut Frame,
+    area: Rect,
+    value: &crate::navigation::StringState,
+    selected: bool,
+) {
+    let block = Block::default()
+        .title(Span::styled(
+            " Backup blob (base64) ",
+            if selected {
+                accent_text()
+            } else {
+                muted_text()
+            },
+        ))
+        .borders(Borders::ALL)
+        .border_style(if selected {
+            selected_border()
+        } else {
+            border()
+        });
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(value.text.clone())
+            .style(text())
+            .wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
+fn render_password_prompt_input(
+    frame: &mut Frame,
+    area: Rect,
+    value: &crate::navigation::StringState,
+    selected: bool,
+) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(if selected {
+            selected_border()
+        } else {
+            border()
+        })
+        .style(panel_alt_background());
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(line_with_caret(value)).style(accent_text()),
+        inner,
+    );
+}
+
+fn render_restore_confirm_toggle(frame: &mut Frame, area: Rect, yes: bool, selected: bool) {
+    let left = if yes {
+        Span::styled("  NO  ", muted_text())
+    } else {
+        Span::styled("  NO  ", danger_text())
+    };
+    let right = if yes {
+        Span::styled("  YES  ", danger_text())
+    } else {
+        Span::styled("  YES  ", muted_text())
+    };
+
+    let pointer = if selected { ">" } else { " " };
+    let line = Line::from(vec![
+        Span::styled(format!("{pointer} Confirm restore: ["), muted_text()),
+        left,
+        Span::styled("] [", muted_text()),
+        right,
+        Span::styled("]", muted_text()),
+    ]);
+
+    frame.render_widget(Paragraph::new(line), area);
+}
+
 fn render_security_modal(frame: &mut Frame, app_area: Rect, modal: &SettingsSecurityModalState) {
     let popup_area =
         centered_rect_no_border((app_area.width.saturating_sub(8)).min(88), 14, app_area);
@@ -637,4 +1141,52 @@ fn describe_update_status(status: &VersionCheckStatus) -> String {
         }
         VersionCheckStatus::Error(err) => format!("error checking updates: {}", err),
     }
+}
+
+fn copy_text_to_clipboard_osc52(text: &str) -> anyhow::Result<()> {
+    let payload = compact_token(text);
+    if payload.is_empty() {
+        anyhow::bail!("backup token is empty")
+    }
+
+    let encoded = base64::engine::general_purpose::STANDARD.encode(payload.as_bytes());
+    let sequence = format!("\u{1b}]52;c;{encoded}\u{7}");
+
+    let mut stdout = io::stdout();
+    stdout
+        .write_all(sequence.as_bytes())
+        .map_err(|err| anyhow::anyhow!("failed to write OSC52 sequence: {err}"))?;
+    stdout
+        .flush()
+        .map_err(|err| anyhow::anyhow!("failed to flush OSC52 sequence: {err}"))?;
+
+    Ok(())
+}
+
+fn compact_token(value: &str) -> String {
+    value.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+fn wrap_token_for_display(value: &str, width: usize) -> String {
+    if width == 0 {
+        return value.to_string();
+    }
+
+    let mut output = String::with_capacity(value.len() + value.len() / width + 1);
+    let mut count = 0usize;
+
+    for ch in value.chars() {
+        output.push(ch);
+        count += 1;
+        if count >= width {
+            output.push('\n');
+            count = 0;
+        }
+    }
+
+    if output.ends_with('\n') {
+        output.pop();
+    }
+
+    output
 }
