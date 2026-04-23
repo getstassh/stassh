@@ -10,13 +10,23 @@ use ratatui::{
 
 use crate::{
     inputs::handle_yes_no_input,
-    navigation::{DashboardPage, DashboardState, SshSessionPhase},
+    navigation::{DashboardPage, DashboardState, SshSessionPhase, SshSessionState},
     screens::AppEffect,
     ssh_client::{
         SessionEvent, SessionInput, StartSessionResult, TrustChallenge, start_session_async,
     },
     ui::{accent_text, button, centered_rect_no_border, modal_block, muted_text, text},
 };
+
+const DASHBOARD_SHELL_BORDER: u16 = 2;
+const SCROLLBACK_STEP_MIN: usize = 8;
+
+pub(crate) fn dashboard_ssh_viewport_size_from_terminal(cols: u16, rows: u16) -> (u16, u16) {
+    (
+        cols.saturating_sub(DASHBOARD_SHELL_BORDER).max(1),
+        rows.saturating_sub(DASHBOARD_SHELL_BORDER).max(1),
+    )
+}
 
 pub(crate) fn handle_key(key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
     let Some(tab_idx) = state.active_ssh_tab else {
@@ -62,14 +72,23 @@ pub(crate) fn handle_key(key: KeyEvent, state: &mut DashboardState) -> Option<Ap
                 }
             }
         }
-        SshSessionPhase::Running { live } => {
+        SshSessionPhase::Running { .. } => {
             if key.code == KeyCode::Esc {
-                live.send_input(SessionInput::Disconnect);
+                if let SshSessionPhase::Running { live } = &mut tab.phase {
+                    live.send_input(SessionInput::Disconnect);
+                }
+                return None;
+            }
+
+            if handle_scrollback_key(key, tab) {
                 return None;
             }
 
             if let Some(bytes) = key_to_bytes(key) {
-                live.send_input(SessionInput::Data(bytes));
+                tab.parser.screen_mut().set_scrollback(0);
+                if let SshSessionPhase::Running { live } = &mut tab.phase {
+                    live.send_input(SessionInput::Data(bytes));
+                }
             }
         }
     }
@@ -99,6 +118,7 @@ pub(crate) fn handle_paste(text: &str, state: &mut DashboardState) {
     };
 
     if let SshSessionPhase::Running { live } = &tab.phase {
+        tab.parser.screen_mut().set_scrollback(0);
         live.send_input(SessionInput::Data(text.as_bytes().to_vec()));
     }
 }
@@ -281,7 +301,33 @@ pub(crate) fn render(frame: &mut Frame, app_area: Rect, area: Rect, state: &Dash
 }
 
 pub(crate) fn footer_hint() -> &'static str {
-    "SSH: type input | Esc disconnect active | Ctrl+Q quick switch"
+    "SSH: type input | PgUp/PgDn/Home/End scroll | Esc disconnect | Ctrl+Q quick switch"
+}
+
+fn handle_scrollback_key(key: KeyEvent, tab: &mut SshSessionState) -> bool {
+    let page = usize::from(tab.last_good_rows.max(1)).saturating_sub(1).max(SCROLLBACK_STEP_MIN);
+    let screen = tab.parser.screen_mut();
+    let current = screen.scrollback();
+
+    match key.code {
+        KeyCode::PageUp => {
+            screen.set_scrollback(current.saturating_add(page));
+            true
+        }
+        KeyCode::PageDown => {
+            screen.set_scrollback(current.saturating_sub(page));
+            true
+        }
+        KeyCode::Home => {
+            screen.set_scrollback(usize::MAX);
+            true
+        }
+        KeyCode::End => {
+            screen.set_scrollback(0);
+            true
+        }
+        _ => false,
+    }
 }
 
 pub(crate) fn close_ssh_tab(state: &mut DashboardState, idx: usize, status: String) {
@@ -401,7 +447,7 @@ fn render_vt100_text(parser: &vt100::Parser) -> Text<'static> {
     }
 
     let (raw_cursor_row, raw_cursor_col) = screen.cursor_position();
-    let cursor_visible = !screen.hide_cursor();
+    let cursor_visible = !screen.hide_cursor() && screen.scrollback() == 0;
     let cursor_row = raw_cursor_row.min(rows.saturating_sub(1));
     let cursor_col = raw_cursor_col.min(cols.saturating_sub(1));
     let mut lines = Vec::with_capacity(rows as usize);

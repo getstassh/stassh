@@ -145,6 +145,7 @@ fn handle_resize(
     rows: u16,
     state: &mut DashboardState,
 ) -> Option<AppEffect> {
+    let (cols, rows) = pages::ssh::dashboard_ssh_viewport_size_from_terminal(cols, rows);
     pages::ssh::handle_resize(cols, rows, state);
     None
 }
@@ -394,9 +395,9 @@ fn handle_endpoint_picker_key(key: KeyEvent, state: &mut DashboardState) -> Opti
                     "{} - {}@{}:{}",
                     picker.host_name, picker.host_user, endpoint.host, endpoint.port
                 );
-                let rows_cols = crossterm::terminal::size().unwrap_or((120, 40));
-                let rows = rows_cols.1;
-                let cols = rows_cols.0;
+                let (cols, rows) = crossterm::terminal::size().unwrap_or((120, 40));
+                let (cols, rows) =
+                    pages::ssh::dashboard_ssh_viewport_size_from_terminal(cols, rows);
                 state
                     .ssh_tabs
                     .push(crate::navigation::SshSessionState::new_starting(

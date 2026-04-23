@@ -81,9 +81,9 @@ pub(crate) fn handle_key(
                         .map(|e| format!("{}:{}", e.host, e.port))
                         .unwrap_or_else(|| "n/a".to_string());
                     let title = format!("{} - {}@{}", host.name, host.user, endpoint);
-                    let rows_cols = crossterm::terminal::size().unwrap_or((120, 40));
-                    let rows = rows_cols.1;
-                    let cols = rows_cols.0;
+                    let (cols, rows) = crossterm::terminal::size().unwrap_or((120, 40));
+                    let (cols, rows) =
+                        super::ssh::dashboard_ssh_viewport_size_from_terminal(cols, rows);
                     state.ssh_tabs.push(SshSessionState::new_starting(
                         title,
                         rows,
