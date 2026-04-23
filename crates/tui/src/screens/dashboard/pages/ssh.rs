@@ -1,5 +1,8 @@
+use std::{io::Write, time::Instant};
+
+use base64::Engine as _;
 use backend::{AppState, TrustedHostKey};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -10,7 +13,10 @@ use ratatui::{
 
 use crate::{
     inputs::handle_yes_no_input,
-    navigation::{DashboardPage, DashboardState, SshSessionPhase, SshSessionState},
+    navigation::{
+        DashboardPage, DashboardState, SshCellPosition, SshCopyToast, SshSelectionState,
+        SshSessionPhase, SshSessionState,
+    },
     screens::AppEffect,
     ssh_client::{
         SessionEvent, SessionInput, StartSessionResult, TrustChallenge, start_session_async,
@@ -21,6 +27,8 @@ use crate::{
 const DASHBOARD_SHELL_BORDER: u16 = 2;
 const SCROLLBACK_STEP_MIN: usize = 8;
 const MOUSE_SCROLL_STEP: usize = 3;
+const SSH_VIEW_OFFSET: u16 = 1;
+const COPY_TOAST_DURATION_MS: u64 = 1200;
 
 pub(crate) fn dashboard_ssh_viewport_size_from_terminal(cols: u16, rows: u16) -> (u16, u16) {
     (
@@ -75,6 +83,9 @@ pub(crate) fn handle_key(key: KeyEvent, state: &mut DashboardState) -> Option<Ap
         }
         SshSessionPhase::Running { .. } => {
             if key.code == KeyCode::Esc {
+                if tab.selection.take().is_some() {
+                    return None;
+                }
                 if let SshSessionPhase::Running { live } = &mut tab.phase {
                     live.send_input(SessionInput::Disconnect);
                 }
@@ -87,6 +98,7 @@ pub(crate) fn handle_key(key: KeyEvent, state: &mut DashboardState) -> Option<Ap
 
             if let Some(bytes) = key_to_bytes(key) {
                 tab.parser.screen_mut().set_scrollback(0);
+                clear_selection_state(tab);
                 if let SshSessionPhase::Running { live } = &mut tab.phase {
                     live.send_input(SessionInput::Data(bytes));
                 }
@@ -118,9 +130,12 @@ pub(crate) fn handle_paste(text: &str, state: &mut DashboardState) {
         return;
     };
 
-    if let SshSessionPhase::Running { live } = &tab.phase {
+    if matches!(tab.phase, SshSessionPhase::Running { .. }) {
         tab.parser.screen_mut().set_scrollback(0);
-        live.send_input(SessionInput::Data(text.as_bytes().to_vec()));
+        clear_selection_state(tab);
+        if let SshSessionPhase::Running { live } = &mut tab.phase {
+            live.send_input(SessionInput::Data(text.as_bytes().to_vec()));
+        }
     }
 }
 
@@ -152,14 +167,70 @@ pub(crate) fn handle_mouse(mouse: MouseEvent, state: &mut DashboardState) {
         return;
     }
 
-    let screen = tab.parser.screen_mut();
-    let current = screen.scrollback();
+    let current = tab.parser.screen().scrollback();
+
     match mouse.kind {
         MouseEventKind::ScrollUp => {
-            screen.set_scrollback(current.saturating_add(MOUSE_SCROLL_STEP));
+            tab.parser
+                .screen_mut()
+                .set_scrollback(current.saturating_add(MOUSE_SCROLL_STEP));
         }
         MouseEventKind::ScrollDown => {
-            screen.set_scrollback(current.saturating_sub(MOUSE_SCROLL_STEP));
+            tab.parser
+                .screen_mut()
+                .set_scrollback(current.saturating_sub(MOUSE_SCROLL_STEP));
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(pos) = mouse_to_cell(mouse, tab) {
+                tab.selection = Some(SshSelectionState {
+                    anchor: pos,
+                    head: pos,
+                    dragging: true,
+                });
+            }
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            let pos = mouse_to_cell(mouse, tab);
+            let Some(selection) = tab.selection.as_mut() else {
+                return;
+            };
+            if let Some(pos) = pos {
+                selection.head = pos;
+                selection.dragging = true;
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            let pos = mouse_to_cell(mouse, tab);
+            let Some(selection) = tab.selection.as_mut() else {
+                return;
+            };
+            if let Some(pos) = pos {
+                selection.head = pos;
+            }
+            selection.dragging = false;
+
+            match copy_current_selection(tab) {
+                Ok(copied_len) if copied_len > 0 => {
+                    tab.copy_toast = Some(SshCopyToast {
+                        message: "Copied".to_string(),
+                        expires_at: Instant::now()
+                            + std::time::Duration::from_millis(COPY_TOAST_DURATION_MS),
+                    });
+                    tab.selection = None;
+                }
+                Ok(_) => {
+                    tab.copy_toast = None;
+                    tab.selection = None;
+                }
+                Err(err) => {
+                    tab.copy_toast = Some(SshCopyToast {
+                        message: format!("Copy failed: {err}"),
+                        expires_at: Instant::now()
+                            + std::time::Duration::from_millis(COPY_TOAST_DURATION_MS),
+                    });
+                    tab.selection = None;
+                }
+            }
         }
         _ => {}
     }
@@ -312,22 +383,23 @@ pub(crate) fn render(frame: &mut Frame, app_area: Rect, area: Rect, state: &Dash
             challenge, choice, ..
         } => {
             frame.render_widget(
-                Paragraph::new(render_vt100_text(&tab.parser)).alignment(Alignment::Left),
+                Paragraph::new(render_vt100_text(tab)).alignment(Alignment::Left),
                 area,
             );
             render_trust_modal(frame, app_area, challenge, choice);
         }
         SshSessionPhase::Running { .. } => {
             frame.render_widget(
-                Paragraph::new(render_vt100_text(&tab.parser)).alignment(Alignment::Left),
+                Paragraph::new(render_vt100_text(tab)).alignment(Alignment::Left),
                 area,
             );
+            render_copy_toast(frame, area, tab);
         }
     }
 }
 
 pub(crate) fn footer_hint() -> &'static str {
-    "SSH: type input | PgUp/PgDn/Home/End scroll | Esc disconnect | Ctrl+Q quick switch"
+    "SSH: type input | Mouse drag auto-copy | Wheel/PgUp/PgDn scroll | Esc clear/disconnect | Ctrl+Q switch"
 }
 
 fn handle_scrollback_key(key: KeyEvent, tab: &mut SshSessionState) -> bool {
@@ -465,12 +537,43 @@ fn render_trust_modal(
     frame.render_widget(actions, chunks[2]);
 }
 
-fn render_vt100_text(parser: &vt100::Parser) -> Text<'static> {
-    let screen = parser.screen();
+fn render_copy_toast(frame: &mut Frame, area: Rect, tab: &SshSessionState) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let Some(toast) = tab.copy_toast.as_ref() else {
+        return;
+    };
+    if toast.expires_at <= Instant::now() {
+        return;
+    }
+
+    let toast_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: 1,
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(
+            format!(" {} ", toast.message),
+            accent_text(),
+        )]))
+            .alignment(Alignment::Right)
+            .style(text()),
+        toast_area,
+    );
+}
+
+fn render_vt100_text(tab: &SshSessionState) -> Text<'static> {
+    let screen = tab.parser.screen();
     let (rows, cols) = screen.size();
     if rows == 0 || cols == 0 {
         return Text::from(Vec::<Line<'static>>::new());
     }
+
+    let selection_range = normalized_selection(tab.selection);
 
     let (raw_cursor_row, raw_cursor_col) = screen.cursor_position();
     let cursor_visible = !screen.hide_cursor() && screen.scrollback() == 0;
@@ -494,11 +597,16 @@ fn render_vt100_text(parser: &vt100::Parser) -> Text<'static> {
 
             let mut style = style_from_cell(cell);
             let is_cursor = cursor_visible && r == cursor_row && c == cursor_col;
+            let is_selected = selection_range
+                .map(|(start, end)| cell_in_selection(r, c, start, end))
+                .unwrap_or(false);
             if is_cursor {
                 style = Style::default()
                     .fg(Color::Gray)
                     .bg(Color::White)
                     .add_modifier(Modifier::DIM);
+            } else if is_selected {
+                style = style.add_modifier(Modifier::REVERSED);
             }
 
             let text = if is_cursor {
@@ -531,6 +639,111 @@ fn render_vt100_text(parser: &vt100::Parser) -> Text<'static> {
     }
 
     Text::from(lines)
+}
+
+fn normalized_selection(
+    selection: Option<SshSelectionState>,
+) -> Option<(SshCellPosition, SshCellPosition)> {
+    let selection = selection?;
+    if cell_ord(selection.anchor) <= cell_ord(selection.head) {
+        Some((selection.anchor, selection.head))
+    } else {
+        Some((selection.head, selection.anchor))
+    }
+}
+
+fn cell_in_selection(
+    row: u16,
+    col: u16,
+    start: SshCellPosition,
+    end: SshCellPosition,
+) -> bool {
+    let point = cell_ord(SshCellPosition { row, col });
+    point >= cell_ord(start) && point <= cell_ord(end)
+}
+
+fn cell_ord(cell: SshCellPosition) -> (u16, u16) {
+    (cell.row, cell.col)
+}
+
+fn mouse_to_cell(mouse: MouseEvent, tab: &SshSessionState) -> Option<SshCellPosition> {
+    let (term_cols, term_rows) = crossterm::terminal::size().ok()?;
+    if term_cols == 0 || term_rows == 0 {
+        return None;
+    }
+
+    let area = Rect {
+        x: SSH_VIEW_OFFSET,
+        y: SSH_VIEW_OFFSET,
+        width: term_cols.saturating_sub(DASHBOARD_SHELL_BORDER),
+        height: term_rows.saturating_sub(DASHBOARD_SHELL_BORDER),
+    };
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+
+    let max_col = tab.last_good_cols.saturating_sub(1);
+    let max_row = tab.last_good_rows.saturating_sub(1);
+
+    let clamped_col = mouse
+        .column
+        .clamp(area.x, area.x.saturating_add(area.width.saturating_sub(1)));
+    let clamped_row = mouse
+        .row
+        .clamp(area.y, area.y.saturating_add(area.height.saturating_sub(1)));
+
+    Some(SshCellPosition {
+        row: clamped_row.saturating_sub(area.y).min(max_row),
+        col: clamped_col.saturating_sub(area.x).min(max_col),
+    })
+}
+
+fn copy_current_selection(tab: &SshSessionState) -> Result<usize, String> {
+    let screen = tab.parser.screen();
+    let (_, cols) = screen.size();
+    let Some((start, end)) = normalized_selection(tab.selection) else {
+        return Ok(0);
+    };
+
+    if start == end {
+        return Ok(0);
+    }
+
+    let end_col_exclusive = end.col.saturating_add(1).min(cols);
+    let selected = screen.contents_between(
+        start.row,
+        start.col,
+        end.row,
+        end_col_exclusive.max(start.col.saturating_add(1)),
+    );
+    if selected.is_empty() {
+        return Ok(0);
+    }
+
+    copy_text_to_clipboard_osc52(&selected)?;
+    Ok(selected.chars().count())
+}
+
+fn copy_text_to_clipboard_osc52(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Err("selection is empty".to_string());
+    }
+
+    let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+    let sequence = format!("\u{1b}]52;c;{encoded}\u{7}");
+
+    let mut stdout = std::io::stdout();
+    stdout
+        .write_all(sequence.as_bytes())
+        .map_err(|err| format!("failed to write OSC52 sequence: {err}"))?;
+    stdout
+        .flush()
+        .map_err(|err| format!("failed to flush OSC52 sequence: {err}"))?;
+    Ok(())
+}
+
+fn clear_selection_state(tab: &mut SshSessionState) {
+    tab.selection = None;
 }
 
 fn style_from_cell(cell: &vt100::Cell) -> Style {

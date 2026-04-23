@@ -55,6 +55,27 @@ pub(crate) struct SshSessionState {
     pub(crate) phase: SshSessionPhase,
     pub(crate) last_good_rows: u16,
     pub(crate) last_good_cols: u16,
+    pub(crate) selection: Option<SshSelectionState>,
+    pub(crate) copy_toast: Option<SshCopyToast>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SshCellPosition {
+    pub(crate) row: u16,
+    pub(crate) col: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SshSelectionState {
+    pub(crate) anchor: SshCellPosition,
+    pub(crate) head: SshCellPosition,
+    pub(crate) dragging: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SshCopyToast {
+    pub(crate) message: String,
+    pub(crate) expires_at: Instant,
 }
 
 impl SshSessionState {
@@ -71,6 +92,8 @@ impl SshSessionState {
             phase: SshSessionPhase::starting(host_id, selected_endpoint_index),
             last_good_rows: rows.max(1),
             last_good_cols: cols.max(1),
+            selection: None,
+            copy_toast: None,
         }
     }
 
