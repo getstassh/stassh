@@ -7,7 +7,7 @@ use std::{
 };
 
 use backend::{AppState, HostAuth, SshEndpoint, SshHost};
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -48,6 +48,7 @@ pub(crate) static HANDLER: ScreenHandler<DashboardState> = ScreenHandler {
     },
     render: ui,
     handle_key,
+    handle_mouse,
     handle_paste,
     handle_resize,
     handle_tick,
@@ -117,6 +118,22 @@ fn handle_paste(_app: &AppState, text: &str, state: &mut DashboardState) -> Opti
         pages::ssh::handle_paste(text, state);
     } else if state.active_page == DashboardPage::Settings {
         pages::settings::handle_paste(text, state);
+    }
+
+    None
+}
+
+fn handle_mouse(_app: &AppState, mouse: MouseEvent, state: &mut DashboardState) -> Option<AppEffect> {
+    if state.update_prompt.is_some() || state.host_modal.is_some() || state.endpoint_picker.is_some() {
+        return None;
+    }
+
+    if state.quick_switcher.is_some() {
+        return None;
+    }
+
+    if state.active_page == DashboardPage::Ssh {
+        pages::ssh::handle_mouse(mouse, state);
     }
 
     None

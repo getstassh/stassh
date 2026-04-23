@@ -6,8 +6,9 @@ use anyhow::Result;
 
 use crossterm::{
     event::{
-        self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
-        Event, KeyCode, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+        self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture,
+        EnableBracketedPaste, EnableFocusChange, EnableMouseCapture, Event, KeyCode,
+        KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
         PushKeyboardEnhancementFlags,
     },
     execute,
@@ -50,6 +51,7 @@ fn main() -> Result<()> {
     execute!(
         terminal.backend_mut(),
         DisableBracketedPaste,
+        DisableMouseCapture,
         DisableFocusChange,
         PopKeyboardEnhancementFlags,
         LeaveAlternateScreen
@@ -73,6 +75,7 @@ fn main() -> Result<()> {
 fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> Result<()> {
     let tick_rate = Duration::from_millis(50);
     let key_rate = Duration::from_millis(16);
+    let mut mouse_capture_enabled = false;
 
     let mut last_tick_time = std::time::Instant::now();
 
@@ -80,6 +83,16 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
         let handler = get_handler_for_screen(&app.screen);
 
         terminal.draw(|frame| handler.render(frame, app))?;
+
+        let should_enable_mouse_capture = app.is_ssh_screen();
+        if should_enable_mouse_capture != mouse_capture_enabled {
+            if should_enable_mouse_capture {
+                execute!(terminal.backend_mut(), EnableMouseCapture)?;
+            } else {
+                execute!(terminal.backend_mut(), DisableMouseCapture)?;
+            }
+            mouse_capture_enabled = should_enable_mouse_capture;
+        }
 
         let time_since_last_tick = last_tick_time.elapsed();
         if time_since_last_tick >= tick_rate {
@@ -122,7 +135,9 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                         handler.handle_resize(app, cols, rows);
                     }
                 }
-                Event::Mouse(_) => {}
+                Event::Mouse(mouse) => {
+                    handler.handle_mouse(app, mouse);
+                }
                 Event::FocusGained => {
                     if let Ok((cols, rows)) = crossterm::terminal::size() {
                         if cols > 0 && rows > 0 {

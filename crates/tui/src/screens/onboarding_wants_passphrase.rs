@@ -28,6 +28,7 @@ pub(crate) static HANDLER: ScreenHandler<OnboardingPassphraseState> = ScreenHand
     },
     render: ui,
     handle_key: handle_key,
+    handle_mouse: |_, _, _| None,
     handle_paste: handle_paste,
     handle_resize: |_, _, _, _| None,
     handle_tick: |_app, _| None,

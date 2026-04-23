@@ -1,5 +1,5 @@
 use backend::{AppState, TrustedHostKey};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -20,6 +20,7 @@ use crate::{
 
 const DASHBOARD_SHELL_BORDER: u16 = 2;
 const SCROLLBACK_STEP_MIN: usize = 8;
+const MOUSE_SCROLL_STEP: usize = 3;
 
 pub(crate) fn dashboard_ssh_viewport_size_from_terminal(cols: u16, rows: u16) -> (u16, u16) {
     (
@@ -136,6 +137,31 @@ pub(crate) fn handle_resize(cols: u16, rows: u16, state: &mut DashboardState) {
                 rows: rows.max(1),
             });
         }
+    }
+}
+
+pub(crate) fn handle_mouse(mouse: MouseEvent, state: &mut DashboardState) {
+    let Some(tab_idx) = state.active_ssh_tab else {
+        return;
+    };
+    let Some(tab) = state.ssh_tabs.get_mut(tab_idx) else {
+        return;
+    };
+
+    if !matches!(tab.phase, SshSessionPhase::Running { .. }) {
+        return;
+    }
+
+    let screen = tab.parser.screen_mut();
+    let current = screen.scrollback();
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            screen.set_scrollback(current.saturating_add(MOUSE_SCROLL_STEP));
+        }
+        MouseEventKind::ScrollDown => {
+            screen.set_scrollback(current.saturating_sub(MOUSE_SCROLL_STEP));
+        }
+        _ => {}
     }
 }
 
