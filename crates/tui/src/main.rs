@@ -6,10 +6,9 @@ use anyhow::Result;
 
 use crossterm::{
     event::{
-        self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture,
-        EnableBracketedPaste, EnableFocusChange, EnableMouseCapture, Event, KeyCode,
-        KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-        PushKeyboardEnhancementFlags,
+        self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+        EnableFocusChange, EnableMouseCapture, Event, KeyCode, KeyEventKind,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -126,10 +125,10 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
 
                     match event {
                         Event::Key(key) => {
-                            let is_press_or_repeat = key.kind == KeyEventKind::Press
-                                || key.kind == KeyEventKind::Repeat;
-                            let is_quick_switch_release = key.kind == KeyEventKind::Release
-                                && app.is_quick_switcher_open();
+                            let is_press_or_repeat =
+                                key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat;
+                            let is_quick_switch_release =
+                                key.kind == KeyEventKind::Release && app.is_quick_switcher_open();
 
                             if is_press_or_repeat || is_quick_switch_release {
                                 if key.code == KeyCode::Esc

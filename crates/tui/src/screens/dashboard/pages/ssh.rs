@@ -15,7 +15,7 @@ use crate::{
     inputs::handle_yes_no_input,
     navigation::{
         DashboardPage, DashboardState, SshCellPosition, SshClickState, SshCopyToast,
-        SshSelectionState, SshSessionPhase, SshSessionState,
+        SshDragScrollDirection, SshSelectionState, SshSessionPhase, SshSessionState,
     },
     screens::AppEffect,
     ssh_client::{
@@ -30,6 +30,7 @@ const MOUSE_SCROLL_STEP: usize = 3;
 const SSH_VIEW_OFFSET: u16 = 1;
 const COPY_TOAST_DURATION_MS: u64 = 1200;
 const DOUBLE_CLICK_MAX_MS: u64 = 400;
+const DRAG_SCROLL_STEP: usize = 1;
 const SSH_BACKGROUND: Color = Color::Black;
 
 pub(crate) fn dashboard_ssh_viewport_size_from_terminal(cols: u16, rows: u16) -> (u16, u16) {
@@ -191,6 +192,7 @@ pub(crate) fn handle_mouse(mouse: MouseEvent, state: &mut DashboardState) {
                                 anchor: start,
                                 head: end,
                                 dragging: false,
+                                drag_scroll: None,
                             });
                             tab.copy_toast = Some(copy_toast("Copied word".to_string()));
                         }
@@ -215,18 +217,21 @@ pub(crate) fn handle_mouse(mouse: MouseEvent, state: &mut DashboardState) {
                     anchor: pos,
                     head: pos,
                     dragging: true,
+                    drag_scroll: None,
                 });
             }
         }
         MouseEventKind::Drag(MouseButton::Left) => {
             let pos = mouse_to_cell(mouse, tab);
+            let drag_scroll = drag_scroll_direction(mouse);
             let Some(selection) = tab.selection.as_mut() else {
                 return;
             };
             if let Some(pos) = pos {
                 selection.head = pos;
-                selection.dragging = true;
             }
+            selection.dragging = true;
+            selection.drag_scroll = drag_scroll;
         }
         MouseEventKind::Up(MouseButton::Left) => {
             if tab
@@ -245,6 +250,7 @@ pub(crate) fn handle_mouse(mouse: MouseEvent, state: &mut DashboardState) {
                 selection.head = pos;
             }
             selection.dragging = false;
+            selection.drag_scroll = None;
 
             match copy_current_selection(tab) {
                 Ok(copied_len) if copied_len > 0 => {
@@ -271,6 +277,7 @@ pub(crate) fn tick_tabs(app: &AppState, state: &mut DashboardState) {
         let mut close_status = None;
         let tab = &mut state.ssh_tabs[idx];
         expire_copy_toast(tab);
+        update_drag_autoscroll(tab);
 
         let mut next_phase = None;
         match &mut tab.phase {
@@ -686,11 +693,14 @@ fn normalized_selection(
 }
 
 fn cell_in_selection(row: u16, col: u16, start: SshCellPosition, end: SshCellPosition) -> bool {
-    let point = cell_ord(SshCellPosition { row, col });
+    let point = cell_ord(SshCellPosition {
+        row: i64::from(row),
+        col,
+    });
     point >= cell_ord(start) && point <= cell_ord(end)
 }
 
-fn cell_ord(cell: SshCellPosition) -> (u16, u16) {
+fn cell_ord(cell: SshCellPosition) -> (i64, u16) {
     (cell.row, cell.col)
 }
 
@@ -724,7 +734,77 @@ fn expire_copy_toast(tab: &mut SshSessionState) {
     }
 }
 
+fn update_drag_autoscroll(tab: &mut SshSessionState) {
+    let Some(selection) = tab.selection.as_mut() else {
+        return;
+    };
+    if !selection.dragging {
+        return;
+    }
+
+    let Some(direction) = selection.drag_scroll else {
+        return;
+    };
+
+    let current = tab.parser.screen().scrollback();
+    let next = match direction {
+        SshDragScrollDirection::Up => current.saturating_add(DRAG_SCROLL_STEP),
+        SshDragScrollDirection::Down => current.saturating_sub(DRAG_SCROLL_STEP),
+    };
+    if next == current {
+        return;
+    }
+
+    tab.parser.screen_mut().set_scrollback(next);
+    let updated = tab.parser.screen().scrollback();
+    if updated == current {
+        return;
+    }
+
+    let delta = i64::try_from(updated.abs_diff(current)).unwrap_or(i64::MAX);
+    match direction {
+        SshDragScrollDirection::Up => {
+            selection.anchor.row = selection.anchor.row.saturating_add(delta);
+            selection.head.row = 0;
+        }
+        SshDragScrollDirection::Down => {
+            selection.anchor.row = selection.anchor.row.saturating_sub(delta);
+            selection.head.row = i64::from(tab.last_good_rows.saturating_sub(1));
+        }
+    }
+}
+
+fn drag_scroll_direction(mouse: MouseEvent) -> Option<SshDragScrollDirection> {
+    let area = ssh_view_area()?;
+    if mouse.row < area.y {
+        Some(SshDragScrollDirection::Up)
+    } else if mouse.row >= area.y.saturating_add(area.height) {
+        Some(SshDragScrollDirection::Down)
+    } else {
+        None
+    }
+}
+
 fn mouse_to_cell(mouse: MouseEvent, tab: &SshSessionState) -> Option<SshCellPosition> {
+    let area = ssh_view_area()?;
+
+    let max_col = tab.last_good_cols.saturating_sub(1);
+    let max_row = tab.last_good_rows.saturating_sub(1);
+
+    let clamped_col = mouse
+        .column
+        .clamp(area.x, area.x.saturating_add(area.width.saturating_sub(1)));
+    let clamped_row = mouse
+        .row
+        .clamp(area.y, area.y.saturating_add(area.height.saturating_sub(1)));
+
+    Some(SshCellPosition {
+        row: i64::from(clamped_row.saturating_sub(area.y).min(max_row)),
+        col: clamped_col.saturating_sub(area.x).min(max_col),
+    })
+}
+
+fn ssh_view_area() -> Option<Rect> {
     let (term_cols, term_rows) = crossterm::terminal::size().ok()?;
     if term_cols == 0 || term_rows == 0 {
         return None;
@@ -740,25 +820,12 @@ fn mouse_to_cell(mouse: MouseEvent, tab: &SshSessionState) -> Option<SshCellPosi
         return None;
     }
 
-    let max_col = tab.last_good_cols.saturating_sub(1);
-    let max_row = tab.last_good_rows.saturating_sub(1);
-
-    let clamped_col = mouse
-        .column
-        .clamp(area.x, area.x.saturating_add(area.width.saturating_sub(1)));
-    let clamped_row = mouse
-        .row
-        .clamp(area.y, area.y.saturating_add(area.height.saturating_sub(1)));
-
-    Some(SshCellPosition {
-        row: clamped_row.saturating_sub(area.y).min(max_row),
-        col: clamped_col.saturating_sub(area.x).min(max_col),
-    })
+    Some(area)
 }
 
 fn copy_current_selection(tab: &SshSessionState) -> Result<usize, String> {
     let screen = tab.parser.screen();
-    let (_, cols) = screen.size();
+    let (rows, cols) = screen.size();
     let Some((start, end)) = normalized_selection(tab.selection) else {
         return Ok(0);
     };
@@ -767,11 +834,14 @@ fn copy_current_selection(tab: &SshSessionState) -> Result<usize, String> {
         return Ok(0);
     }
 
+    let start_row = clamp_selection_row(start.row, rows);
+    let end_row = clamp_selection_row(end.row, rows);
+
     let end_col_exclusive = end.col.saturating_add(1).min(cols);
     let selected = screen.contents_between(
-        start.row,
+        start_row,
         start.col,
-        end.row,
+        end_row,
         end_col_exclusive.max(start.col.saturating_add(1)),
     );
     if selected.is_empty() {
@@ -782,27 +852,35 @@ fn copy_current_selection(tab: &SshSessionState) -> Result<usize, String> {
     Ok(selected.chars().count())
 }
 
+fn clamp_selection_row(row: i64, rows: u16) -> u16 {
+    let max_row = i64::from(rows.saturating_sub(1));
+    row.clamp(0, max_row) as u16
+}
+
 fn copy_word_at(
     tab: &SshSessionState,
     pos: SshCellPosition,
 ) -> Result<Option<(SshCellPosition, SshCellPosition)>, String> {
     let screen = tab.parser.screen();
     let (rows, cols) = screen.size();
-    if pos.row >= rows || pos.col >= cols || !is_word_cell(screen, pos.row, pos.col) {
+    let Ok(row) = u16::try_from(pos.row) else {
+        return Ok(None);
+    };
+    if row >= rows || pos.col >= cols || !is_word_cell(screen, row, pos.col) {
         return Ok(None);
     }
 
     let mut start = pos.col;
-    while start > 0 && is_word_cell(screen, pos.row, start.saturating_sub(1)) {
+    while start > 0 && is_word_cell(screen, row, start.saturating_sub(1)) {
         start = start.saturating_sub(1);
     }
 
     let mut end_exclusive = pos.col.saturating_add(1).min(cols);
-    while end_exclusive < cols && is_word_cell(screen, pos.row, end_exclusive) {
+    while end_exclusive < cols && is_word_cell(screen, row, end_exclusive) {
         end_exclusive = end_exclusive.saturating_add(1);
     }
 
-    let word = screen.contents_between(pos.row, start, pos.row, end_exclusive);
+    let word = screen.contents_between(row, start, row, end_exclusive);
     if word.is_empty() {
         return Ok(None);
     }
@@ -810,11 +888,11 @@ fn copy_word_at(
     copy_text_to_clipboard_osc52(&word)?;
     Ok(Some((
         SshCellPosition {
-            row: pos.row,
+            row: i64::from(row),
             col: start,
         },
         SshCellPosition {
-            row: pos.row,
+            row: i64::from(row),
             col: end_exclusive.saturating_sub(1),
         },
     )))

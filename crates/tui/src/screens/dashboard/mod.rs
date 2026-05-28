@@ -123,8 +123,15 @@ fn handle_paste(_app: &AppState, text: &str, state: &mut DashboardState) -> Opti
     None
 }
 
-fn handle_mouse(_app: &AppState, mouse: MouseEvent, state: &mut DashboardState) -> Option<AppEffect> {
-    if state.update_prompt.is_some() || state.host_modal.is_some() || state.endpoint_picker.is_some() {
+fn handle_mouse(
+    _app: &AppState,
+    mouse: MouseEvent,
+    state: &mut DashboardState,
+) -> Option<AppEffect> {
+    if state.update_prompt.is_some()
+        || state.host_modal.is_some()
+        || state.endpoint_picker.is_some()
+    {
         return None;
     }
 

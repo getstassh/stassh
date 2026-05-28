@@ -62,7 +62,7 @@ pub(crate) struct SshSessionState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SshCellPosition {
-    pub(crate) row: u16,
+    pub(crate) row: i64,
     pub(crate) col: u16,
 }
 
@@ -71,6 +71,13 @@ pub(crate) struct SshSelectionState {
     pub(crate) anchor: SshCellPosition,
     pub(crate) head: SshCellPosition,
     pub(crate) dragging: bool,
+    pub(crate) drag_scroll: Option<SshDragScrollDirection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SshDragScrollDirection {
+    Up,
+    Down,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
