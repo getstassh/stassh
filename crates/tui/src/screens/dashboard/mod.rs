@@ -64,7 +64,7 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
     }
 
     if state.endpoint_picker.is_some() {
-        return handle_endpoint_picker_key(key, state);
+        return handle_endpoint_picker_key(app, key, state);
     }
 
     if state.quick_switcher.is_some() {
@@ -81,6 +81,26 @@ fn handle_key(app: &AppState, key: KeyEvent, state: &mut DashboardState) -> Opti
             switcher.ctrl_cycle_on_release = true;
         }
         return None;
+    }
+
+    if state.active_page == DashboardPage::Ssh && is_ssh_fullscreen_toggle(key) {
+        let fullscreen = !app.config.ssh_fullscreen;
+        if let Ok((cols, rows)) = crossterm::terminal::size()
+            && cols > 0
+            && rows > 0
+        {
+            let (cols, rows) = ssh_viewport_size_from_terminal(cols, rows, fullscreen);
+            pages::ssh::handle_resize(cols, rows, state);
+        }
+        state.last_status = Some(if fullscreen {
+            "SSH fullscreen enabled".to_string()
+        } else {
+            "SSH fullscreen disabled".to_string()
+        });
+        return Some(Box::new(|app| {
+            app.config.ssh_fullscreen = !app.config.ssh_fullscreen;
+            let _ = app.save_config();
+        }));
     }
 
     match state.active_page {
@@ -124,7 +144,7 @@ fn handle_paste(_app: &AppState, text: &str, state: &mut DashboardState) -> Opti
 }
 
 fn handle_mouse(
-    _app: &AppState,
+    app: &AppState,
     mouse: MouseEvent,
     state: &mut DashboardState,
 ) -> Option<AppEffect> {
@@ -140,7 +160,9 @@ fn handle_mouse(
     }
 
     if state.active_page == DashboardPage::Ssh {
-        pages::ssh::handle_mouse(mouse, state);
+        if let Some(area) = pages::ssh::ssh_view_area_from_terminal(app.config.ssh_fullscreen) {
+            pages::ssh::handle_mouse(mouse, area, state);
+        }
     }
 
     None
@@ -164,14 +186,32 @@ fn handle_tick(app: &AppState, state: &mut DashboardState) -> Option<AppEffect> 
 }
 
 fn handle_resize(
-    _app: &AppState,
+    app: &AppState,
     cols: u16,
     rows: u16,
     state: &mut DashboardState,
 ) -> Option<AppEffect> {
-    let (cols, rows) = pages::ssh::dashboard_ssh_viewport_size_from_terminal(cols, rows);
+    let (cols, rows) = ssh_viewport_size_from_terminal(cols, rows, app.config.ssh_fullscreen);
     pages::ssh::handle_resize(cols, rows, state);
     None
+}
+
+fn is_ssh_fullscreen_toggle(key: KeyEvent) -> bool {
+    key.code == KeyCode::Char('f')
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+        && key.modifiers.contains(KeyModifiers::ALT)
+}
+
+pub(crate) fn ssh_viewport_size_from_terminal(
+    cols: u16,
+    rows: u16,
+    fullscreen: bool,
+) -> (u16, u16) {
+    if fullscreen {
+        (cols.max(1), rows.max(1))
+    } else {
+        pages::ssh::dashboard_ssh_viewport_size_from_terminal(cols, rows)
+    }
 }
 
 fn reap_probe_tasks(state: &mut DashboardState) {
@@ -389,7 +429,11 @@ fn handle_modal_key(
     None
 }
 
-fn handle_endpoint_picker_key(key: KeyEvent, state: &mut DashboardState) -> Option<AppEffect> {
+fn handle_endpoint_picker_key(
+    app: &AppState,
+    key: KeyEvent,
+    state: &mut DashboardState,
+) -> Option<AppEffect> {
     if key.kind != KeyEventKind::Press && key.kind != KeyEventKind::Repeat {
         return None;
     }
@@ -421,7 +465,7 @@ fn handle_endpoint_picker_key(key: KeyEvent, state: &mut DashboardState) -> Opti
                 );
                 let (cols, rows) = crossterm::terminal::size().unwrap_or((120, 40));
                 let (cols, rows) =
-                    pages::ssh::dashboard_ssh_viewport_size_from_terminal(cols, rows);
+                    ssh_viewport_size_from_terminal(cols, rows, app.config.ssh_fullscreen);
                 state
                     .ssh_tabs
                     .push(crate::navigation::SshSessionState::new_starting(
@@ -1637,6 +1681,18 @@ fn handle_update_prompt_key(key: KeyEvent, state: &mut DashboardState) -> Option
 
 fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
     let a = frame.area();
+
+    if state.active_page == DashboardPage::Ssh && app.config.ssh_fullscreen {
+        pages::ssh::render(frame, a, a, state);
+        if state.quick_switcher.is_some() {
+            render_quick_switcher_modal(frame, a, state);
+        }
+        if let Some(update_prompt) = &state.update_prompt {
+            render_update_prompt_modal(frame, a, update_prompt);
+        }
+        return;
+    }
+
     let footer = keybind_hint(state);
     let header_title = match state.active_page {
         DashboardPage::Home => "Stassh Dashboard",

@@ -158,7 +158,7 @@ pub(crate) fn handle_resize(cols: u16, rows: u16, state: &mut DashboardState) {
     }
 }
 
-pub(crate) fn handle_mouse(mouse: MouseEvent, state: &mut DashboardState) {
+pub(crate) fn handle_mouse(mouse: MouseEvent, area: Rect, state: &mut DashboardState) {
     let Some(tab_idx) = state.active_ssh_tab else {
         return;
     };
@@ -184,7 +184,7 @@ pub(crate) fn handle_mouse(mouse: MouseEvent, state: &mut DashboardState) {
                 .set_scrollback(current.saturating_sub(MOUSE_SCROLL_STEP));
         }
         MouseEventKind::Down(MouseButton::Left) => {
-            if let Some(pos) = mouse_to_cell(mouse, tab) {
+            if let Some(pos) = mouse_to_cell(mouse, area, tab) {
                 if is_double_click(tab, pos) {
                     match copy_word_at(tab, pos) {
                         Ok(Some((start, end))) => {
@@ -222,8 +222,8 @@ pub(crate) fn handle_mouse(mouse: MouseEvent, state: &mut DashboardState) {
             }
         }
         MouseEventKind::Drag(MouseButton::Left) => {
-            let pos = mouse_to_cell(mouse, tab);
-            let drag_scroll = drag_scroll_direction(mouse);
+            let pos = mouse_to_cell(mouse, area, tab);
+            let drag_scroll = drag_scroll_direction(mouse, area);
             let Some(selection) = tab.selection.as_mut() else {
                 return;
             };
@@ -242,7 +242,7 @@ pub(crate) fn handle_mouse(mouse: MouseEvent, state: &mut DashboardState) {
                 return;
             }
 
-            let pos = mouse_to_cell(mouse, tab);
+            let pos = mouse_to_cell(mouse, area, tab);
             let Some(selection) = tab.selection.as_mut() else {
                 return;
             };
@@ -440,7 +440,36 @@ pub(crate) fn render(frame: &mut Frame, app_area: Rect, area: Rect, state: &Dash
 }
 
 pub(crate) fn footer_hint() -> &'static str {
-    "SSH: type input | Drag/double-click copy | Wheel/PgUp/PgDn scroll | Esc clear/disconnect | Ctrl+Q switch"
+    "SSH: type input | Drag/double-click copy | Wheel/PgUp/PgDn scroll | Ctrl+Alt+F fullscreen | Esc clear/disconnect | Ctrl+Q switch"
+}
+
+pub(crate) fn ssh_view_area_from_terminal(fullscreen: bool) -> Option<Rect> {
+    let (term_cols, term_rows) = crossterm::terminal::size().ok()?;
+    if term_cols == 0 || term_rows == 0 {
+        return None;
+    }
+
+    let area = if fullscreen {
+        Rect {
+            x: 0,
+            y: 0,
+            width: term_cols,
+            height: term_rows,
+        }
+    } else {
+        Rect {
+            x: SSH_VIEW_OFFSET,
+            y: SSH_VIEW_OFFSET,
+            width: term_cols.saturating_sub(DASHBOARD_SHELL_BORDER),
+            height: term_rows.saturating_sub(DASHBOARD_SHELL_BORDER),
+        }
+    };
+
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+
+    Some(area)
 }
 
 fn handle_scrollback_key(key: KeyEvent, tab: &mut SshSessionState) -> bool {
@@ -774,8 +803,7 @@ fn update_drag_autoscroll(tab: &mut SshSessionState) {
     }
 }
 
-fn drag_scroll_direction(mouse: MouseEvent) -> Option<SshDragScrollDirection> {
-    let area = ssh_view_area()?;
+fn drag_scroll_direction(mouse: MouseEvent, area: Rect) -> Option<SshDragScrollDirection> {
     if mouse.row < area.y {
         Some(SshDragScrollDirection::Up)
     } else if mouse.row >= area.y.saturating_add(area.height) {
@@ -785,8 +813,10 @@ fn drag_scroll_direction(mouse: MouseEvent) -> Option<SshDragScrollDirection> {
     }
 }
 
-fn mouse_to_cell(mouse: MouseEvent, tab: &SshSessionState) -> Option<SshCellPosition> {
-    let area = ssh_view_area()?;
+fn mouse_to_cell(mouse: MouseEvent, area: Rect, tab: &SshSessionState) -> Option<SshCellPosition> {
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
 
     let max_col = tab.last_good_cols.saturating_sub(1);
     let max_row = tab.last_good_rows.saturating_sub(1);
@@ -802,25 +832,6 @@ fn mouse_to_cell(mouse: MouseEvent, tab: &SshSessionState) -> Option<SshCellPosi
         row: i64::from(clamped_row.saturating_sub(area.y).min(max_row)),
         col: clamped_col.saturating_sub(area.x).min(max_col),
     })
-}
-
-fn ssh_view_area() -> Option<Rect> {
-    let (term_cols, term_rows) = crossterm::terminal::size().ok()?;
-    if term_cols == 0 || term_rows == 0 {
-        return None;
-    }
-
-    let area = Rect {
-        x: SSH_VIEW_OFFSET,
-        y: SSH_VIEW_OFFSET,
-        width: term_cols.saturating_sub(DASHBOARD_SHELL_BORDER),
-        height: term_rows.saturating_sub(DASHBOARD_SHELL_BORDER),
-    };
-    if area.width == 0 || area.height == 0 {
-        return None;
-    }
-
-    Some(area)
 }
 
 fn copy_current_selection(tab: &SshSessionState) -> Result<usize, String> {

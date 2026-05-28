@@ -82,8 +82,11 @@ pub(crate) fn handle_key(
                         .unwrap_or_else(|| "n/a".to_string());
                     let title = format!("{} - {}@{}", host.name, host.user, endpoint);
                     let (cols, rows) = crossterm::terminal::size().unwrap_or((120, 40));
-                    let (cols, rows) =
-                        super::ssh::dashboard_ssh_viewport_size_from_terminal(cols, rows);
+                    let (cols, rows) = super::super::ssh_viewport_size_from_terminal(
+                        cols,
+                        rows,
+                        app.config.ssh_fullscreen,
+                    );
                     state.ssh_tabs.push(SshSessionState::new_starting(
                         title,
                         rows,
@@ -176,7 +179,7 @@ pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &Dash
 }
 
 pub(crate) fn footer_hint() -> &'static str {
-    "Arrows or hjkl move | A add | E edit | Enter connect | Ctrl+Q quick switch | Esc exit"
+    "Arrows/hjkl move | A add | E edit | Enter connect | Ctrl+Alt+F SSH fullscreen | Ctrl+Q switch | Esc exit"
 }
 
 fn render_host_card(

@@ -6,6 +6,7 @@ use rusqlite::{Connection, params};
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../sql/001_init.sql")),
     (2, include_str!("../sql/002_deleted_show_debug_panel.sql")),
+    (3, include_str!("../sql/003_add_ssh_fullscreen.sql")),
 ];
 
 pub(crate) fn apply(conn: &Connection) -> Result<()> {

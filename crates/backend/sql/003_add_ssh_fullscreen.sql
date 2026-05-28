@@ -1,0 +1,1 @@
+ALTER TABLE app_config ADD COLUMN ssh_fullscreen INTEGER NOT NULL DEFAULT 0;
