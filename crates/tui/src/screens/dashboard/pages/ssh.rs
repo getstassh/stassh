@@ -30,6 +30,7 @@ const MOUSE_SCROLL_STEP: usize = 3;
 const SSH_VIEW_OFFSET: u16 = 1;
 const COPY_TOAST_DURATION_MS: u64 = 1200;
 const DOUBLE_CLICK_MAX_MS: u64 = 400;
+const SSH_BACKGROUND: Color = Color::Black;
 
 pub(crate) fn dashboard_ssh_viewport_size_from_terminal(cols: u16, rows: u16) -> (u16, u16) {
     (
@@ -404,14 +405,18 @@ pub(crate) fn render(frame: &mut Frame, app_area: Rect, area: Rect, state: &Dash
             challenge, choice, ..
         } => {
             frame.render_widget(
-                Paragraph::new(render_vt100_text(tab)).alignment(Alignment::Left),
+                Paragraph::new(render_vt100_text(tab))
+                    .alignment(Alignment::Left)
+                    .style(Style::default().bg(SSH_BACKGROUND)),
                 area,
             );
             render_trust_modal(frame, app_area, challenge, choice);
         }
         SshSessionPhase::Running { .. } => {
             frame.render_widget(
-                Paragraph::new(render_vt100_text(tab)).alignment(Alignment::Left),
+                Paragraph::new(render_vt100_text(tab))
+                    .alignment(Alignment::Left)
+                    .style(Style::default().bg(SSH_BACKGROUND)),
                 area,
             );
             render_copy_toast(frame, area, tab);
@@ -841,8 +846,8 @@ fn clear_selection_state(tab: &mut SshSessionState) {
 fn style_from_cell(cell: &vt100::Cell) -> Style {
     let mut style = Style::default();
 
-    style = style.fg(map_color(cell.fgcolor()));
-    style = style.bg(map_color(cell.bgcolor()));
+    style = style.fg(map_foreground_color(cell.fgcolor()));
+    style = style.bg(map_background_color(cell.bgcolor()));
 
     if cell.bold() {
         style = style.add_modifier(Modifier::BOLD);
@@ -863,9 +868,17 @@ fn style_from_cell(cell: &vt100::Cell) -> Style {
     style
 }
 
-fn map_color(color: vt100::Color) -> Color {
+fn map_foreground_color(color: vt100::Color) -> Color {
     match color {
         vt100::Color::Default => Color::Reset,
+        vt100::Color::Idx(i) => Color::Indexed(i),
+        vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+    }
+}
+
+fn map_background_color(color: vt100::Color) -> Color {
+    match color {
+        vt100::Color::Default => SSH_BACKGROUND,
         vt100::Color::Idx(i) => Color::Indexed(i),
         vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
     }
