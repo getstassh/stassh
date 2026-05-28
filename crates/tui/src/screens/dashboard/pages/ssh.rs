@@ -1,7 +1,7 @@
 use std::{io::Write, time::Instant};
 
-use base64::Engine as _;
 use backend::{AppState, TrustedHostKey};
+use base64::Engine as _;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     Frame,
@@ -14,8 +14,8 @@ use ratatui::{
 use crate::{
     inputs::handle_yes_no_input,
     navigation::{
-        DashboardPage, DashboardState, SshCellPosition, SshCopyToast, SshSelectionState,
-        SshSessionPhase, SshSessionState,
+        DashboardPage, DashboardState, SshCellPosition, SshClickState, SshCopyToast,
+        SshSelectionState, SshSessionPhase, SshSessionState,
     },
     screens::AppEffect,
     ssh_client::{
@@ -29,6 +29,7 @@ const SCROLLBACK_STEP_MIN: usize = 8;
 const MOUSE_SCROLL_STEP: usize = 3;
 const SSH_VIEW_OFFSET: u16 = 1;
 const COPY_TOAST_DURATION_MS: u64 = 1200;
+const DOUBLE_CLICK_MAX_MS: u64 = 400;
 
 pub(crate) fn dashboard_ssh_viewport_size_from_terminal(cols: u16, rows: u16) -> (u16, u16) {
     (
@@ -182,6 +183,33 @@ pub(crate) fn handle_mouse(mouse: MouseEvent, state: &mut DashboardState) {
         }
         MouseEventKind::Down(MouseButton::Left) => {
             if let Some(pos) = mouse_to_cell(mouse, tab) {
+                if is_double_click(tab, pos) {
+                    match copy_word_at(tab, pos) {
+                        Ok(Some((start, end))) => {
+                            tab.selection = Some(SshSelectionState {
+                                anchor: start,
+                                head: end,
+                                dragging: false,
+                            });
+                            tab.copy_toast = Some(copy_toast("Copied word".to_string()));
+                        }
+                        Ok(None) => {
+                            tab.selection = None;
+                            tab.copy_toast = None;
+                        }
+                        Err(err) => {
+                            tab.selection = None;
+                            tab.copy_toast = Some(copy_toast(format!("Copy failed: {err}")));
+                        }
+                    }
+                    tab.last_click = None;
+                    return;
+                }
+
+                tab.last_click = Some(SshClickState {
+                    position: pos,
+                    at: Instant::now(),
+                });
                 tab.selection = Some(SshSelectionState {
                     anchor: pos,
                     head: pos,
@@ -211,11 +239,7 @@ pub(crate) fn handle_mouse(mouse: MouseEvent, state: &mut DashboardState) {
 
             match copy_current_selection(tab) {
                 Ok(copied_len) if copied_len > 0 => {
-                    tab.copy_toast = Some(SshCopyToast {
-                        message: "Copied".to_string(),
-                        expires_at: Instant::now()
-                            + std::time::Duration::from_millis(COPY_TOAST_DURATION_MS),
-                    });
+                    tab.copy_toast = Some(copy_toast("Copied".to_string()));
                     tab.selection = None;
                 }
                 Ok(_) => {
@@ -223,11 +247,7 @@ pub(crate) fn handle_mouse(mouse: MouseEvent, state: &mut DashboardState) {
                     tab.selection = None;
                 }
                 Err(err) => {
-                    tab.copy_toast = Some(SshCopyToast {
-                        message: format!("Copy failed: {err}"),
-                        expires_at: Instant::now()
-                            + std::time::Duration::from_millis(COPY_TOAST_DURATION_MS),
-                    });
+                    tab.copy_toast = Some(copy_toast(format!("Copy failed: {err}")));
                     tab.selection = None;
                 }
             }
@@ -241,6 +261,7 @@ pub(crate) fn tick_tabs(app: &AppState, state: &mut DashboardState) {
     while idx < state.ssh_tabs.len() {
         let mut close_status = None;
         let tab = &mut state.ssh_tabs[idx];
+        expire_copy_toast(tab);
 
         let mut next_phase = None;
         match &mut tab.phase {
@@ -399,11 +420,13 @@ pub(crate) fn render(frame: &mut Frame, app_area: Rect, area: Rect, state: &Dash
 }
 
 pub(crate) fn footer_hint() -> &'static str {
-    "SSH: type input | Mouse drag auto-copy | Wheel/PgUp/PgDn scroll | Esc clear/disconnect | Ctrl+Q switch"
+    "SSH: type input | Drag/double-click copy | Wheel/PgUp/PgDn scroll | Esc clear/disconnect | Ctrl+Q switch"
 }
 
 fn handle_scrollback_key(key: KeyEvent, tab: &mut SshSessionState) -> bool {
-    let page = usize::from(tab.last_good_rows.max(1)).saturating_sub(1).max(SCROLLBACK_STEP_MIN);
+    let page = usize::from(tab.last_good_rows.max(1))
+        .saturating_sub(1)
+        .max(SCROLLBACK_STEP_MIN);
     let screen = tab.parser.screen_mut();
     let current = screen.scrollback();
 
@@ -560,8 +583,8 @@ fn render_copy_toast(frame: &mut Frame, area: Rect, tab: &SshSessionState) {
             format!(" {} ", toast.message),
             accent_text(),
         )]))
-            .alignment(Alignment::Right)
-            .style(text()),
+        .alignment(Alignment::Right)
+        .style(text()),
         toast_area,
     );
 }
@@ -652,18 +675,43 @@ fn normalized_selection(
     }
 }
 
-fn cell_in_selection(
-    row: u16,
-    col: u16,
-    start: SshCellPosition,
-    end: SshCellPosition,
-) -> bool {
+fn cell_in_selection(row: u16, col: u16, start: SshCellPosition, end: SshCellPosition) -> bool {
     let point = cell_ord(SshCellPosition { row, col });
     point >= cell_ord(start) && point <= cell_ord(end)
 }
 
 fn cell_ord(cell: SshCellPosition) -> (u16, u16) {
     (cell.row, cell.col)
+}
+
+fn is_double_click(tab: &SshSessionState, pos: SshCellPosition) -> bool {
+    tab.last_click.is_some_and(|last| {
+        last.position == pos && last.at.elapsed().as_millis() <= u128::from(DOUBLE_CLICK_MAX_MS)
+    })
+}
+
+fn copy_toast(message: String) -> SshCopyToast {
+    SshCopyToast {
+        message,
+        expires_at: Instant::now() + std::time::Duration::from_millis(COPY_TOAST_DURATION_MS),
+    }
+}
+
+fn expire_copy_toast(tab: &mut SshSessionState) {
+    if tab
+        .copy_toast
+        .as_ref()
+        .is_some_and(|toast| toast.expires_at <= Instant::now())
+    {
+        tab.copy_toast = None;
+        if tab
+            .selection
+            .as_ref()
+            .is_some_and(|selection| !selection.dragging)
+        {
+            tab.selection = None;
+        }
+    }
 }
 
 fn mouse_to_cell(mouse: MouseEvent, tab: &SshSessionState) -> Option<SshCellPosition> {
@@ -722,6 +770,50 @@ fn copy_current_selection(tab: &SshSessionState) -> Result<usize, String> {
 
     copy_text_to_clipboard_osc52(&selected)?;
     Ok(selected.chars().count())
+}
+
+fn copy_word_at(
+    tab: &SshSessionState,
+    pos: SshCellPosition,
+) -> Result<Option<(SshCellPosition, SshCellPosition)>, String> {
+    let screen = tab.parser.screen();
+    let (rows, cols) = screen.size();
+    if pos.row >= rows || pos.col >= cols || !is_word_cell(screen, pos.row, pos.col) {
+        return Ok(None);
+    }
+
+    let mut start = pos.col;
+    while start > 0 && is_word_cell(screen, pos.row, start.saturating_sub(1)) {
+        start = start.saturating_sub(1);
+    }
+
+    let mut end_exclusive = pos.col.saturating_add(1).min(cols);
+    while end_exclusive < cols && is_word_cell(screen, pos.row, end_exclusive) {
+        end_exclusive = end_exclusive.saturating_add(1);
+    }
+
+    let word = screen.contents_between(pos.row, start, pos.row, end_exclusive);
+    if word.is_empty() {
+        return Ok(None);
+    }
+
+    copy_text_to_clipboard_osc52(&word)?;
+    Ok(Some((
+        SshCellPosition {
+            row: pos.row,
+            col: start,
+        },
+        SshCellPosition {
+            row: pos.row,
+            col: end_exclusive.saturating_sub(1),
+        },
+    )))
+}
+
+fn is_word_cell(screen: &vt100::Screen, row: u16, col: u16) -> bool {
+    screen.cell(row, col).is_some_and(|cell| {
+        cell.has_contents() && !cell.contents().chars().all(char::is_whitespace)
+    })
 }
 
 fn copy_text_to_clipboard_osc52(text: &str) -> Result<(), String> {

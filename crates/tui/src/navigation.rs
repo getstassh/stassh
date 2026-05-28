@@ -56,6 +56,7 @@ pub(crate) struct SshSessionState {
     pub(crate) last_good_rows: u16,
     pub(crate) last_good_cols: u16,
     pub(crate) selection: Option<SshSelectionState>,
+    pub(crate) last_click: Option<SshClickState>,
     pub(crate) copy_toast: Option<SshCopyToast>,
 }
 
@@ -70,6 +71,12 @@ pub(crate) struct SshSelectionState {
     pub(crate) anchor: SshCellPosition,
     pub(crate) head: SshCellPosition,
     pub(crate) dragging: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SshClickState {
+    pub(crate) position: SshCellPosition,
+    pub(crate) at: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +100,7 @@ impl SshSessionState {
             last_good_rows: rows.max(1),
             last_good_cols: cols.max(1),
             selection: None,
+            last_click: None,
             copy_toast: None,
         }
     }
