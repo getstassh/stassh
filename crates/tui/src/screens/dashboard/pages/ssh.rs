@@ -577,19 +577,16 @@ fn render_copy_toast(frame: &mut Frame, area: Rect, tab: &SshSessionState) {
         return;
     }
 
+    let message = format!(" {} ", toast.message);
+    let toast_width = (message.chars().count() as u16).min(area.width);
     let toast_area = Rect {
-        x: area.x,
+        x: area.x + area.width.saturating_sub(toast_width),
         y: area.y,
-        width: area.width,
+        width: toast_width,
         height: 1,
     };
     frame.render_widget(
-        Paragraph::new(Line::from(vec![Span::styled(
-            format!(" {} ", toast.message),
-            accent_text(),
-        )]))
-        .alignment(Alignment::Right)
-        .style(text()),
+        Paragraph::new(Line::from(vec![Span::styled(message, accent_text())])),
         toast_area,
     );
 }
