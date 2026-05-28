@@ -107,45 +107,74 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
         }
 
         if event::poll(key_rate)? {
-            match event::read()? {
-                Event::Key(key) => {
-                    let is_press_or_repeat =
-                        key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat;
-                    let is_quick_switch_release =
-                        key.kind == KeyEventKind::Release && app.is_quick_switcher_open();
+            let mut pending_drag = None;
 
-                    if is_press_or_repeat || is_quick_switch_release {
-                        if key.code == KeyCode::Esc && !app.is_ssh_screen() && !app.has_modal_open()
-                        {
-                            return Ok(());
+            loop {
+                let event = event::read()?;
+
+                if let Event::Mouse(mouse) = event
+                    && matches!(
+                        mouse.kind,
+                        crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left)
+                    )
+                {
+                    pending_drag = Some(mouse);
+                } else {
+                    if let Some(mouse) = pending_drag.take() {
+                        handler.handle_mouse(app, mouse);
+                    }
+
+                    match event {
+                        Event::Key(key) => {
+                            let is_press_or_repeat = key.kind == KeyEventKind::Press
+                                || key.kind == KeyEventKind::Repeat;
+                            let is_quick_switch_release = key.kind == KeyEventKind::Release
+                                && app.is_quick_switcher_open();
+
+                            if is_press_or_repeat || is_quick_switch_release {
+                                if key.code == KeyCode::Esc
+                                    && !app.is_ssh_screen()
+                                    && !app.has_modal_open()
+                                {
+                                    return Ok(());
+                                }
+
+                                handler.handle_key(app, key);
+
+                                if app.exit_requested() {
+                                    return Ok(());
+                                }
+                            }
                         }
-
-                        handler.handle_key(app, key);
-
-                        if app.exit_requested() {
-                            return Ok(());
+                        Event::Paste(text) => {
+                            handler.handle_paste(app, &text);
                         }
+                        Event::Resize(cols, rows) => {
+                            if cols > 0 && rows > 0 {
+                                handler.handle_resize(app, cols, rows);
+                            }
+                        }
+                        Event::Mouse(mouse) => {
+                            handler.handle_mouse(app, mouse);
+                        }
+                        Event::FocusGained => {
+                            if let Ok((cols, rows)) = crossterm::terminal::size() {
+                                if cols > 0 && rows > 0 {
+                                    handler.handle_resize(app, cols, rows);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                Event::Paste(text) => {
-                    handler.handle_paste(app, &text);
+
+                if !event::poll(Duration::ZERO)? {
+                    break;
                 }
-                Event::Resize(cols, rows) => {
-                    if cols > 0 && rows > 0 {
-                        handler.handle_resize(app, cols, rows);
-                    }
-                }
-                Event::Mouse(mouse) => {
-                    handler.handle_mouse(app, mouse);
-                }
-                Event::FocusGained => {
-                    if let Ok((cols, rows)) = crossterm::terminal::size() {
-                        if cols > 0 && rows > 0 {
-                            handler.handle_resize(app, cols, rows);
-                        }
-                    }
-                }
-                _ => {}
+            }
+
+            if let Some(mouse) = pending_drag {
+                handler.handle_mouse(app, mouse);
             }
         }
     }
