@@ -495,13 +495,13 @@ fn handle_endpoint_picker_key(
 }
 
 fn save_modal(
-    app: &AppState,
+    _app: &AppState,
     selected_host: usize,
     modal: &mut HostModalState,
 ) -> Option<AppEffect> {
     let form = modal.form.clone();
     let validation = validate_form(&form);
-    let (name, user, endpoints, auth) = match validation {
+    let (name, user, group, endpoints, auth) = match validation {
         Ok(v) => v,
         Err(err) => {
             modal.form.error = Some(err);
@@ -510,8 +510,6 @@ fn save_modal(
     };
 
     let mode = modal.mode;
-    let create_selected_index = app.db.hosts.len();
-
     Some(Box::new(move |app| {
         match mode {
             HostModalMode::Create => {
@@ -522,11 +520,15 @@ fn save_modal(
                     id,
                     name,
                     user,
+                    group,
                     endpoints,
                     auth,
                 });
+                let selected_index = pages::home::visible_index_for_host_id(&app.db.hosts, id);
                 if let Screen::Dashboard { state } = &mut app.screen {
-                    state.selected_host = create_selected_index;
+                    if let Some(idx) = selected_index {
+                        state.selected_host = idx;
+                    }
                     state
                         .host_statuses
                         .insert(id, vec![HostConnectionStatus::Unknown; status_len]);
@@ -538,13 +540,15 @@ fn save_modal(
                 if let Some(existing) = app.db.hosts.iter_mut().find(|h| h.id == host_id) {
                     existing.name = name;
                     existing.user = user;
+                    existing.group = group;
                     existing.endpoints = endpoints;
                     existing.auth = auth;
                     updated_endpoints_len = Some(existing.endpoints.len());
                 }
-                let max_selected = app.db.hosts.len().saturating_sub(1);
+                let selected_index = pages::home::visible_index_for_host_id(&app.db.hosts, host_id)
+                    .unwrap_or(selected_host);
                 if let Screen::Dashboard { state } = &mut app.screen {
-                    state.selected_host = selected_host.min(max_selected);
+                    state.selected_host = selected_index;
                     if let Some(updated_endpoints_len) = updated_endpoints_len {
                         state.host_statuses.insert(
                             host_id,
@@ -622,6 +626,7 @@ fn edit_form_field(form: &mut HostFormState, key: KeyEvent) {
         HostFormField::Name => Some(&mut form.name),
         HostFormField::User => Some(&mut form.user),
         HostFormField::Endpoints => Some(&mut form.endpoints),
+        HostFormField::Group => Some(&mut form.group),
         HostFormField::AuthValue => match form.auth_mode {
             HostAuthMode::Key => match form.key_input_mode {
                 HostKeyInputMode::Path => None,
@@ -698,6 +703,7 @@ fn insert_pasted_text(form: &mut HostFormState, text: &str) {
         HostFormField::Name => Some(&mut form.name),
         HostFormField::User => Some(&mut form.user),
         HostFormField::Endpoints => Some(&mut form.endpoints),
+        HostFormField::Group => Some(&mut form.group),
         HostFormField::AuthValue => match form.auth_mode {
             HostAuthMode::Key => match form.key_input_mode {
                 HostKeyInputMode::Path => None,
@@ -719,7 +725,7 @@ fn insert_pasted_text(form: &mut HostFormState, text: &str) {
 
 fn validate_form(
     form: &HostFormState,
-) -> Result<(String, String, Vec<SshEndpoint>, HostAuth), String> {
+) -> Result<(String, String, String, Vec<SshEndpoint>, HostAuth), String> {
     let name = form.name.trim().to_string();
     if name.is_empty() {
         return Err("Name is required".to_string());
@@ -734,6 +740,7 @@ fn validate_form(
     if user.is_empty() {
         return Err("User is required".to_string());
     }
+    let group = form.group.trim().to_string();
 
     let auth = match form.auth_mode {
         HostAuthMode::Key => match form.key_input_mode {
@@ -761,7 +768,7 @@ fn validate_form(
         }
     };
 
-    Ok((name, user, endpoints, auth))
+    Ok((name, user, group, endpoints, auth))
 }
 
 fn parse_endpoints(value: &str) -> Result<Vec<SshEndpoint>, String> {
@@ -805,6 +812,7 @@ fn current_field_value(form: &HostFormState) -> String {
         HostFormField::Name => form.name.clone(),
         HostFormField::User => form.user.clone(),
         HostFormField::Endpoints => form.endpoints.clone(),
+        HostFormField::Group => form.group.clone(),
         HostFormField::AuthMode => String::new(),
         HostFormField::AuthValue => match form.auth_mode {
             HostAuthMode::Key => match form.key_input_mode {
@@ -1927,7 +1935,7 @@ fn render_quick_switcher_modal(frame: &mut Frame, app_area: Rect, state: &Dashbo
 
 fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) {
     let width = (app_area.width.saturating_sub(4)).min(100);
-    let height = 24;
+    let height = 27;
     let popup_area = centered_rect_no_border(width, height, app_area);
 
     frame.render_widget(Clear, popup_area);
@@ -1956,6 +1964,7 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(5),
+            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(auth_value_height),
             Constraint::Min(1),
@@ -1993,6 +2002,17 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
         None,
     );
 
+    render_input_field(
+        frame,
+        chunks[3],
+        "Group (optional)",
+        &modal.form.group,
+        modal.form.focus == HostFormField::Group,
+        modal.form.caret,
+        false,
+        Some("Ungrouped"),
+    );
+
     let auth_text = match auth_selection(&modal.form) {
         AuthSelection::KeyPath => "key path on system".to_string(),
         AuthSelection::KeyInline => "key in database".to_string(),
@@ -2000,7 +2020,7 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
     };
     render_input_field(
         frame,
-        chunks[3],
+        chunks[4],
         "Auth mode [Left/Right cycles: path key, db key, password]",
         &auth_text,
         modal.form.focus == HostFormField::AuthMode,
@@ -2030,7 +2050,7 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
 
     render_input_field(
         frame,
-        chunks[4],
+        chunks[5],
         auth_value_label,
         &auth_value,
         modal.form.focus == HostFormField::AuthValue,
@@ -2048,7 +2068,7 @@ fn render_host_modal(frame: &mut Frame, app_area: Rect, modal: &HostModalState) 
     if let Some(error_text) = &modal.form.error {
         frame.render_widget(
             Paragraph::new(error_text.as_str()).style(danger_text()),
-            chunks[5],
+            chunks[6],
         );
     }
 

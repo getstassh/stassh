@@ -1,0 +1,1 @@
+ALTER TABLE hosts ADD COLUMN group_name TEXT NOT NULL DEFAULT '';

@@ -22,12 +22,39 @@ use crate::{
 
 const HOME_GRID_COLUMNS: usize = 3;
 const HOST_CARD_HEIGHT: u16 = 7;
+const GROUP_HEADER_HEIGHT: u16 = 1;
+const UNGROUPED_LABEL: &str = "Ungrouped";
+
+struct HostGroupView {
+    name: String,
+    host_indices: Vec<usize>,
+    ungrouped: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct VisibleHostPosition {
+    visible_index: usize,
+    group_index: usize,
+    row: usize,
+    col: usize,
+}
+
+#[derive(Clone, Copy)]
+enum MoveDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
 
 pub(crate) fn handle_key(
     app: &AppState,
     key: KeyEvent,
     state: &mut DashboardState,
 ) -> Option<AppEffect> {
+    let groups = grouped_hosts(&app.db.hosts);
+    let visible_len = visible_host_indices(&groups).len();
+    let columns = HOME_GRID_COLUMNS.min(visible_len.max(1));
     match key.code {
         KeyCode::Char('a') => {
             state.host_modal = Some(HostModalState {
@@ -37,7 +64,7 @@ pub(crate) fn handle_key(
             });
         }
         KeyCode::Char('e') => {
-            if let Some(host) = app.db.hosts.get(state.selected_host) {
+            if let Some(host) = selected_host(app, state.selected_host) {
                 state.host_modal = Some(HostModalState {
                     mode: HostModalMode::Edit { host_id: host.id },
                     form: form_from_host(host),
@@ -46,19 +73,23 @@ pub(crate) fn handle_key(
             }
         }
         KeyCode::Left | KeyCode::Char('h') => {
-            state.selected_host = move_left(state.selected_host, app.db.hosts.len());
+            state.selected_host =
+                move_selection(state.selected_host, &groups, columns, MoveDirection::Left);
         }
         KeyCode::Right | KeyCode::Char('l') => {
-            state.selected_host = move_right(state.selected_host, app.db.hosts.len());
+            state.selected_host =
+                move_selection(state.selected_host, &groups, columns, MoveDirection::Right);
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            state.selected_host = move_up(state.selected_host, app.db.hosts.len());
+            state.selected_host =
+                move_selection(state.selected_host, &groups, columns, MoveDirection::Up);
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            state.selected_host = move_down(state.selected_host, app.db.hosts.len());
+            state.selected_host =
+                move_selection(state.selected_host, &groups, columns, MoveDirection::Down);
         }
         KeyCode::Enter => {
-            if let Some(host) = app.db.hosts.get(state.selected_host) {
+            if let Some(host) = selected_host(app, state.selected_host) {
                 if host.endpoints.len() > 1 {
                     let preferred = app
                         .db
@@ -124,6 +155,12 @@ pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &Dash
         return;
     }
 
+    let groups = grouped_hosts(&app.db.hosts);
+    let visible_indices = visible_host_indices(&groups);
+    if visible_indices.is_empty() {
+        return;
+    }
+
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(2), Constraint::Min(0)])
@@ -140,39 +177,67 @@ pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &Dash
         );
     }
 
-    let grid_area = layout[1];
-    let columns = HOME_GRID_COLUMNS.min(app.db.hosts.len().max(1));
-    let rows = app.db.hosts.len().div_ceil(columns);
-
-    let mut row_constraints = vec![Constraint::Length(HOST_CARD_HEIGHT); rows];
+    let content_area = layout[1];
+    let columns = HOME_GRID_COLUMNS.min(visible_indices.len().max(1));
+    let mut row_constraints = Vec::new();
+    for group in &groups {
+        row_constraints.push(Constraint::Length(GROUP_HEADER_HEIGHT));
+        row_constraints.extend(vec![
+            Constraint::Length(HOST_CARD_HEIGHT);
+            group.host_indices.len().div_ceil(columns)
+        ]);
+    }
     row_constraints.push(Constraint::Fill(1));
     let row_areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints(row_constraints)
-        .split(grid_area);
+        .split(content_area);
 
-    for (row_idx, row_area) in row_areas.iter().take(rows).enumerate() {
-        let column_areas = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(vec![Constraint::Ratio(1, columns as u32); columns])
-            .split(*row_area);
+    let selected_visible = state
+        .selected_host
+        .min(visible_indices.len().saturating_sub(1));
+    let mut row_area_idx = 0;
+    let mut visible_idx = 0;
 
-        for (col_idx, col_area) in column_areas.iter().enumerate() {
-            let index = row_idx * columns + col_idx;
-            if let Some(host) = app.db.hosts.get(index) {
-                let selected = index == state.selected_host;
-                let statuses = state
-                    .host_statuses
-                    .get(&host.id)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        host.endpoints
-                            .clone()
-                            .into_iter()
-                            .map(|_| HostConnectionStatus::Unknown)
-                            .collect()
-                    });
-                render_host_card(frame, *col_area, host, selected, &statuses);
+    for group in &groups {
+        if let Some(header_area) = row_areas.get(row_area_idx) {
+            render_group_header(frame, *header_area, group);
+        }
+        row_area_idx += 1;
+
+        let rows = group.host_indices.len().div_ceil(columns);
+        for row_idx in 0..rows {
+            let Some(row_area) = row_areas.get(row_area_idx) else {
+                return;
+            };
+            row_area_idx += 1;
+
+            let column_areas = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints(vec![Constraint::Ratio(1, columns as u32); columns])
+                .split(*row_area);
+
+            for (col_idx, col_area) in column_areas.iter().enumerate() {
+                let index = row_idx * columns + col_idx;
+                if let Some(host_index) = group.host_indices.get(index).copied()
+                    && let Some(host) = app.db.hosts.get(host_index)
+                {
+                    let selected = visible_idx == selected_visible;
+                    let statuses =
+                        state
+                            .host_statuses
+                            .get(&host.id)
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                host.endpoints
+                                    .clone()
+                                    .into_iter()
+                                    .map(|_| HostConnectionStatus::Unknown)
+                                    .collect()
+                            });
+                    render_host_card(frame, *col_area, host, selected, &statuses);
+                    visible_idx += 1;
+                }
             }
         }
     }
@@ -180,6 +245,119 @@ pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &Dash
 
 pub(crate) fn footer_hint() -> &'static str {
     "Arrows/hjkl move | A add | E edit | Enter connect | Ctrl+Alt+F SSH fullscreen | Ctrl+Q switch | Esc exit"
+}
+
+pub(crate) fn visible_index_for_host_id(hosts: &[SshHost], host_id: u32) -> Option<usize> {
+    let groups = grouped_hosts(hosts);
+    visible_host_indices(&groups).iter().position(|host_index| {
+        hosts
+            .get(*host_index)
+            .is_some_and(|host| host.id == host_id)
+    })
+}
+
+fn selected_host(app: &AppState, selected: usize) -> Option<&SshHost> {
+    let groups = grouped_hosts(&app.db.hosts);
+    let visible_indices = visible_host_indices(&groups);
+    let host_index = visible_indices.get(selected).copied()?;
+    app.db.hosts.get(host_index)
+}
+
+fn grouped_hosts(hosts: &[SshHost]) -> Vec<HostGroupView> {
+    let mut named_groups: Vec<String> = Vec::new();
+    let mut has_ungrouped = false;
+
+    for host in hosts {
+        let group = host.group.trim();
+        if group.is_empty() {
+            has_ungrouped = true;
+            continue;
+        }
+        if !named_groups
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(group))
+        {
+            named_groups.push(group.to_string());
+        }
+    }
+
+    named_groups.sort_by_key(|group| group.to_ascii_lowercase());
+    let mut groups = Vec::new();
+
+    for group_name in named_groups {
+        let mut host_indices = hosts
+            .iter()
+            .enumerate()
+            .filter(|(_, host)| host.group.trim().eq_ignore_ascii_case(&group_name))
+            .map(|(idx, _)| idx)
+            .collect::<Vec<_>>();
+        sort_host_indices(hosts, &mut host_indices);
+        groups.push(HostGroupView {
+            name: group_name,
+            host_indices,
+            ungrouped: false,
+        });
+    }
+
+    if has_ungrouped {
+        let mut host_indices = hosts
+            .iter()
+            .enumerate()
+            .filter(|(_, host)| host.group.trim().is_empty())
+            .map(|(idx, _)| idx)
+            .collect::<Vec<_>>();
+        sort_host_indices(hosts, &mut host_indices);
+        groups.push(HostGroupView {
+            name: UNGROUPED_LABEL.to_string(),
+            host_indices,
+            ungrouped: true,
+        });
+    }
+
+    groups
+}
+
+fn sort_host_indices(hosts: &[SshHost], indices: &mut [usize]) {
+    indices.sort_by(|a, b| {
+        let host_a = &hosts[*a];
+        let host_b = &hosts[*b];
+        host_a
+            .name
+            .to_ascii_lowercase()
+            .cmp(&host_b.name.to_ascii_lowercase())
+            .then_with(|| host_a.id.cmp(&host_b.id))
+    });
+}
+
+fn visible_host_indices(groups: &[HostGroupView]) -> Vec<usize> {
+    groups
+        .iter()
+        .flat_map(|group| group.host_indices.iter().copied())
+        .collect()
+}
+
+fn render_group_header(frame: &mut Frame, area: Rect, group: &HostGroupView) {
+    let style = if group.ungrouped {
+        muted_text()
+    } else {
+        accent_text()
+    };
+    let line = Line::from(vec![
+        Span::styled(group.name.clone(), style),
+        Span::styled(
+            format!(
+                "  {} host{}",
+                group.host_indices.len(),
+                if group.host_indices.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ),
+            muted_text(),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 fn render_host_card(
@@ -255,6 +433,7 @@ fn form_from_host(host: &SshHost) -> HostFormState {
     let mut form = HostFormState::new();
     form.name = host.name.clone();
     form.user = host.user.clone();
+    form.group = host.group.clone();
     form.endpoints = host
         .endpoints
         .iter()
@@ -303,53 +482,126 @@ fn status_letters(statuses: &[HostConnectionStatus]) -> Line<'static> {
     Line::from(spans)
 }
 
-fn move_left(selected: usize, hosts_len: usize) -> usize {
-    if hosts_len == 0 {
+fn move_selection(
+    selected: usize,
+    groups: &[HostGroupView],
+    columns: usize,
+    direction: MoveDirection,
+) -> usize {
+    let positions = visible_host_positions(groups, columns);
+    if positions.is_empty() {
         return 0;
     }
-    if selected % HOME_GRID_COLUMNS == 0 {
-        selected
-    } else {
-        selected.saturating_sub(1)
+
+    let selected = selected.min(positions.len().saturating_sub(1));
+    let current = positions[selected];
+    match direction {
+        MoveDirection::Left => positions
+            .iter()
+            .find(|position| {
+                position.group_index == current.group_index
+                    && position.row == current.row
+                    && position.col + 1 == current.col
+            })
+            .map_or(selected, |position| position.visible_index),
+        MoveDirection::Right => positions
+            .iter()
+            .find(|position| {
+                position.group_index == current.group_index
+                    && position.row == current.row
+                    && position.col == current.col + 1
+            })
+            .map_or(selected, |position| position.visible_index),
+        MoveDirection::Up => move_vertical(current, &positions, -1).unwrap_or(selected),
+        MoveDirection::Down => move_vertical(current, &positions, 1).unwrap_or(selected),
     }
 }
 
-fn move_right(selected: usize, hosts_len: usize) -> usize {
-    if hosts_len == 0 {
-        return 0;
-    }
-    if (selected % HOME_GRID_COLUMNS) == HOME_GRID_COLUMNS - 1 || selected + 1 >= hosts_len {
-        selected
+fn move_vertical(
+    current: VisibleHostPosition,
+    positions: &[VisibleHostPosition],
+    step: isize,
+) -> Option<usize> {
+    let mut rows = positions
+        .iter()
+        .map(|position| (position.group_index, position.row))
+        .collect::<Vec<_>>();
+    rows.dedup();
+
+    let current_row_idx = rows
+        .iter()
+        .position(|row| *row == (current.group_index, current.row))?;
+    let target_row_idx = if step < 0 {
+        current_row_idx.checked_sub(1)?
     } else {
-        selected + 1
-    }
+        let next = current_row_idx + 1;
+        if next >= rows.len() {
+            return None;
+        }
+        next
+    };
+    let (target_group, target_row) = rows[target_row_idx];
+
+    positions
+        .iter()
+        .filter(|position| position.group_index == target_group && position.row == target_row)
+        .min_by_key(|position| position.col.abs_diff(current.col))
+        .map(|position| position.visible_index)
 }
 
-fn move_up(selected: usize, hosts_len: usize) -> usize {
-    if hosts_len == 0 {
-        return 0;
+fn visible_host_positions(groups: &[HostGroupView], columns: usize) -> Vec<VisibleHostPosition> {
+    let columns = columns.max(1);
+    let mut positions = Vec::new();
+
+    for (group_index, group) in groups.iter().enumerate() {
+        for idx in 0..group.host_indices.len() {
+            positions.push(VisibleHostPosition {
+                visible_index: positions.len(),
+                group_index,
+                row: idx / columns,
+                col: idx % columns,
+            });
+        }
     }
-    if selected >= HOME_GRID_COLUMNS {
-        selected - HOME_GRID_COLUMNS
-    } else {
-        selected
-    }
+
+    positions
 }
 
-fn move_down(selected: usize, hosts_len: usize) -> usize {
-    if hosts_len == 0 {
-        return 0;
+#[cfg(test)]
+mod tests {
+    use super::{HostGroupView, MoveDirection, move_selection};
+
+    fn group(count: usize) -> HostGroupView {
+        HostGroupView {
+            name: "group".to_string(),
+            host_indices: (0..count).collect(),
+            ungrouped: false,
+        }
     }
 
-    let next_row_same_col = selected + HOME_GRID_COLUMNS;
-    if next_row_same_col < hosts_len {
-        return next_row_same_col;
+    #[test]
+    fn down_skips_group_headers_and_preserves_column() {
+        let groups = vec![group(1), group(3)];
+        assert_eq!(move_selection(0, &groups, 3, MoveDirection::Down), 1);
     }
 
-    let next_row_start = ((selected / HOME_GRID_COLUMNS) + 1) * HOME_GRID_COLUMNS;
-    if next_row_start < hosts_len {
-        return next_row_start;
+    #[test]
+    fn up_from_second_group_returns_to_previous_group_row() {
+        let groups = vec![group(2), group(3)];
+        assert_eq!(move_selection(3, &groups, 3, MoveDirection::Up), 1);
     }
 
-    selected
+    #[test]
+    fn down_clamps_to_last_column_in_shorter_row() {
+        let groups = vec![group(3), group(1)];
+        assert_eq!(move_selection(2, &groups, 3, MoveDirection::Down), 3);
+    }
+
+    #[test]
+    fn horizontal_navigation_stays_within_group_row() {
+        let groups = vec![group(1), group(2)];
+        assert_eq!(move_selection(0, &groups, 3, MoveDirection::Right), 0);
+        assert_eq!(move_selection(1, &groups, 3, MoveDirection::Right), 2);
+        assert_eq!(move_selection(1, &groups, 3, MoveDirection::Left), 1);
+    }
 }

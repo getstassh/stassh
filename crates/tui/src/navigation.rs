@@ -381,6 +381,7 @@ pub(crate) enum HostFormField {
     Name,
     User,
     Endpoints,
+    Group,
     AuthMode,
     AuthValue,
 }
@@ -390,7 +391,8 @@ impl HostFormField {
         match self {
             Self::Name => Self::User,
             Self::User => Self::Endpoints,
-            Self::Endpoints => Self::AuthMode,
+            Self::Endpoints => Self::Group,
+            Self::Group => Self::AuthMode,
             Self::AuthMode => Self::AuthValue,
             Self::AuthValue => Self::Name,
         }
@@ -401,7 +403,8 @@ impl HostFormField {
             Self::Name => Self::AuthValue,
             Self::User => Self::Name,
             Self::Endpoints => Self::User,
-            Self::AuthMode => Self::Endpoints,
+            Self::Group => Self::Endpoints,
+            Self::AuthMode => Self::Group,
             Self::AuthValue => Self::AuthMode,
         }
     }
@@ -419,6 +422,7 @@ pub(crate) struct HostFormState {
     pub(crate) name: String,
     pub(crate) user: String,
     pub(crate) endpoints: String,
+    pub(crate) group: String,
     pub(crate) auth_mode: HostAuthMode,
     pub(crate) key_input_mode: HostKeyInputMode,
     pub(crate) key_path: String,
@@ -435,6 +439,7 @@ impl HostFormState {
             name: String::new(),
             user: String::new(),
             endpoints: String::new(),
+            group: String::new(),
             auth_mode: HostAuthMode::Password,
             key_input_mode: HostKeyInputMode::Path,
             key_path: String::new(),

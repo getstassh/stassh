@@ -47,6 +47,7 @@ pub struct SshHost {
     pub id: u32,
     pub name: String,
     pub user: String,
+    pub group: String,
     pub endpoints: Vec<SshEndpoint>,
     pub auth: HostAuth,
 }
@@ -727,7 +728,7 @@ fn load_database(conn: &Connection) -> Result<Database> {
     let remembered_endpoint_indices = read_remembered_endpoint_indices(conn)?;
 
     let mut hosts_stmt = conn
-        .prepare("SELECT id, name, user, auth_json_value FROM hosts ORDER BY id ASC")
+        .prepare("SELECT id, name, user, group_name, auth_json_value FROM hosts ORDER BY id ASC")
         .map_err(map_sql_error)?;
     let host_rows = hosts_stmt
         .query_map([], |row| {
@@ -736,13 +737,14 @@ fn load_database(conn: &Connection) -> Result<Database> {
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
             ))
         })
         .map_err(map_sql_error)?;
 
     let mut hosts = Vec::new();
     for row in host_rows {
-        let (id, name, user, auth_json) = row.map_err(map_sql_error)?;
+        let (id, name, user, group, auth_json) = row.map_err(map_sql_error)?;
         let auth: HostAuth =
             serde_json::from_str(&auth_json).context("failed to parse host auth JSON payload")?;
         let endpoints = load_host_endpoints(conn, id as u32)?;
@@ -751,6 +753,7 @@ fn load_database(conn: &Connection) -> Result<Database> {
             id: id as u32,
             name,
             user,
+            group,
             endpoints,
             auth,
         });
@@ -824,8 +827,15 @@ fn save_database(conn: &Connection, db: &Database) -> Result<()> {
     for host in &db.hosts {
         let auth_json = serde_json::to_string(&host.auth).context("failed to encode host auth")?;
         tx.execute(
-            "INSERT INTO hosts(id, name, user, auth_kind, auth_json_value) VALUES(?1, ?2, ?3, ?4, ?5)",
-            params![host.id, host.name, host.user, auth_kind(&host.auth), auth_json],
+            "INSERT INTO hosts(id, name, user, group_name, auth_kind, auth_json_value) VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                host.id,
+                host.name,
+                host.user,
+                host.group,
+                auth_kind(&host.auth),
+                auth_json
+            ],
         )
         .map_err(map_sql_error)?;
 
