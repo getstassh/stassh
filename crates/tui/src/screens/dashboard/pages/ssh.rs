@@ -229,6 +229,14 @@ pub(crate) fn handle_mouse(mouse: MouseEvent, state: &mut DashboardState) {
             }
         }
         MouseEventKind::Up(MouseButton::Left) => {
+            if tab
+                .selection
+                .as_ref()
+                .is_some_and(|selection| !selection.dragging)
+            {
+                return;
+            }
+
             let pos = mouse_to_cell(mouse, tab);
             let Some(selection) = tab.selection.as_mut() else {
                 return;
