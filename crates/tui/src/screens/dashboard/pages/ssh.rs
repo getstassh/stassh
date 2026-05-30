@@ -31,6 +31,7 @@ const SSH_VIEW_OFFSET: u16 = 1;
 const COPY_TOAST_DURATION_MS: u64 = 1200;
 const DOUBLE_CLICK_MAX_MS: u64 = 400;
 const DRAG_SCROLL_STEP: usize = 1;
+const DRAG_SCROLL_EDGE_ROWS: u16 = 1;
 const SSH_BACKGROUND: Color = Color::Black;
 
 pub(crate) fn dashboard_ssh_viewport_size_from_terminal(cols: u16, rows: u16) -> (u16, u16) {
@@ -804,9 +805,20 @@ fn update_drag_autoscroll(tab: &mut SshSessionState) {
 }
 
 fn drag_scroll_direction(mouse: MouseEvent, area: Rect) -> Option<SshDragScrollDirection> {
-    if mouse.row < area.y {
+    if area.height == 0 {
+        return None;
+    }
+
+    let top_edge = area
+        .y
+        .saturating_add(DRAG_SCROLL_EDGE_ROWS.saturating_sub(1));
+    let bottom_edge = area
+        .y
+        .saturating_add(area.height.saturating_sub(DRAG_SCROLL_EDGE_ROWS));
+
+    if mouse.row <= top_edge {
         Some(SshDragScrollDirection::Up)
-    } else if mouse.row >= area.y.saturating_add(area.height) {
+    } else if mouse.row >= bottom_edge {
         Some(SshDragScrollDirection::Down)
     } else {
         None
