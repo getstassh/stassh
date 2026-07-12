@@ -187,58 +187,108 @@ pub(crate) fn render(frame: &mut Frame, area: Rect, app: &AppState, state: &Dash
             group.host_indices.len().div_ceil(columns)
         ]);
     }
-    row_constraints.push(Constraint::Fill(1));
-    let row_areas = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(row_constraints)
-        .split(content_area);
 
     let selected_visible = state
         .selected_host
         .min(visible_indices.len().saturating_sub(1));
-    let mut row_area_idx = 0;
+
+    let selected_group = group_of_visible_host(&groups, selected_visible);
+    let mut scroll_offset = 0usize;
+    for i in 0..selected_group {
+        scroll_offset += 1 + groups[i].host_indices.len().div_ceil(columns);
+    }
+    let total_rows = total_visible_rows(&groups, columns);
+    if scroll_offset >= total_rows {
+        scroll_offset = 0;
+    }
+
+    let mut rows_fit = 0usize;
+    let mut used = 0u16;
+    for c in row_constraints.iter().skip(scroll_offset) {
+        let Constraint::Length(h) = c else { break; };
+        if used + h > content_area.height {
+            break;
+        }
+        used += h;
+        rows_fit += 1;
+    }
+    rows_fit = rows_fit.max(1);
+
+    let mut visible_constraints: Vec<Constraint> = row_constraints
+        .iter()
+        .skip(scroll_offset)
+        .take(rows_fit)
+        .cloned()
+        .collect();
+    visible_constraints.push(Constraint::Fill(1));
+    let row_areas = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(visible_constraints)
+        .split(content_area);
+
     let mut visible_idx = 0;
+    let mut current_row = 0usize;
+    let mut area_idx = 0;
 
     for group in &groups {
-        if let Some(header_area) = row_areas.get(row_area_idx) {
-            render_group_header(frame, *header_area, group);
+        if area_idx >= rows_fit && current_row >= scroll_offset {
+            break;
         }
-        row_area_idx += 1;
 
-        let rows = group.host_indices.len().div_ceil(columns);
-        for row_idx in 0..rows {
-            let Some(row_area) = row_areas.get(row_area_idx) else {
-                return;
-            };
-            row_area_idx += 1;
-
-            let column_areas = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints(vec![Constraint::Ratio(1, columns as u32); columns])
-                .split(*row_area);
-
-            for (col_idx, col_area) in column_areas.iter().enumerate() {
-                let index = row_idx * columns + col_idx;
-                if let Some(host_index) = group.host_indices.get(index).copied()
-                    && let Some(host) = app.db.hosts.get(host_index)
-                {
-                    let selected = visible_idx == selected_visible;
-                    let statuses =
-                        state
-                            .host_statuses
-                            .get(&host.id)
-                            .cloned()
-                            .unwrap_or_else(|| {
-                                host.endpoints
-                                    .clone()
-                                    .into_iter()
-                                    .map(|_| HostConnectionStatus::Unknown)
-                                    .collect()
-                            });
-                    render_host_card(frame, *col_area, host, selected, &statuses);
-                    visible_idx += 1;
+        if current_row >= scroll_offset {
+            if area_idx < rows_fit {
+                if let Some(header_area) = row_areas.get(area_idx) {
+                    render_group_header(frame, *header_area, group);
                 }
+                area_idx += 1;
             }
+        }
+        current_row += 1;
+
+        let card_rows = group.host_indices.len().div_ceil(columns);
+        for row_idx in 0..card_rows {
+            if area_idx >= rows_fit {
+                break;
+            }
+
+            let in_view = current_row >= scroll_offset;
+            if in_view {
+                if let Some(row_area) = row_areas.get(area_idx) {
+                    let column_areas = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints(vec![Constraint::Ratio(1, columns as u32); columns])
+                        .split(*row_area);
+
+                    for (col_idx, col_area) in column_areas.iter().enumerate() {
+                        let index = row_idx * columns + col_idx;
+                        if let Some(host_index) = group.host_indices.get(index).copied()
+                            && let Some(host) = app.db.hosts.get(host_index)
+                        {
+                            let selected = visible_idx == selected_visible;
+                            let statuses =
+                                state
+                                    .host_statuses
+                                    .get(&host.id)
+                                    .cloned()
+                                    .unwrap_or_else(|| {
+                                        host.endpoints
+                                            .clone()
+                                            .into_iter()
+                                            .map(|_| HostConnectionStatus::Unknown)
+                                            .collect()
+                                    });
+                            render_host_card(frame, *col_area, host, selected, &statuses);
+                            visible_idx += 1;
+                        }
+                    }
+                }
+                area_idx += 1;
+            } else {
+                let cards_in_row =
+                    columns.min(group.host_indices.len().saturating_sub(row_idx * columns));
+                visible_idx += cards_in_row;
+            }
+            current_row += 1;
         }
     }
 }
@@ -547,6 +597,24 @@ fn move_vertical(
         .filter(|position| position.group_index == target_group && position.row == target_row)
         .min_by_key(|position| position.col.abs_diff(current.col))
         .map(|position| position.visible_index)
+}
+
+fn group_of_visible_host(groups: &[HostGroupView], visible_index: usize) -> usize {
+    let mut remaining = visible_index;
+    for (i, group) in groups.iter().enumerate() {
+        if remaining < group.host_indices.len() {
+            return i;
+        }
+        remaining -= group.host_indices.len();
+    }
+    0
+}
+
+fn total_visible_rows(groups: &[HostGroupView], columns: usize) -> usize {
+    groups
+        .iter()
+        .map(|g| 1 + g.host_indices.len().div_ceil(columns))
+        .sum()
 }
 
 fn visible_host_positions(groups: &[HostGroupView], columns: usize) -> Vec<VisibleHostPosition> {
