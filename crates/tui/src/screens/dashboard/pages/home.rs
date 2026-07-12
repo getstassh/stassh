@@ -546,22 +546,50 @@ fn move_selection(
     let selected = selected.min(positions.len().saturating_sub(1));
     let current = positions[selected];
     match direction {
-        MoveDirection::Left => positions
-            .iter()
-            .find(|position| {
+        MoveDirection::Left => {
+            let left = positions.iter().find(|position| {
                 position.group_index == current.group_index
                     && position.row == current.row
                     && position.col + 1 == current.col
-            })
-            .map_or(selected, |position| position.visible_index),
-        MoveDirection::Right => positions
-            .iter()
-            .find(|position| {
+            });
+            match left {
+                Some(p) => p.visible_index,
+                None => move_vertical(current, &positions, -1)
+                    .and_then(|idx| {
+                        let target = positions[idx];
+                        positions
+                            .iter()
+                            .filter(|p| {
+                                p.group_index == target.group_index && p.row == target.row
+                            })
+                            .max_by_key(|p| p.col)
+                            .map(|p| p.visible_index)
+                    })
+                    .unwrap_or(selected),
+            }
+        }
+        MoveDirection::Right => {
+            let right = positions.iter().find(|position| {
                 position.group_index == current.group_index
                     && position.row == current.row
                     && position.col == current.col + 1
-            })
-            .map_or(selected, |position| position.visible_index),
+            });
+            match right {
+                Some(p) => p.visible_index,
+                None => move_vertical(current, &positions, 1)
+                    .and_then(|idx| {
+                        let target = positions[idx];
+                        positions
+                            .iter()
+                            .filter(|p| {
+                                p.group_index == target.group_index && p.row == target.row
+                            })
+                            .min_by_key(|p| p.col)
+                            .map(|p| p.visible_index)
+                    })
+                    .unwrap_or(selected),
+            }
+        }
         MoveDirection::Up => move_vertical(current, &positions, -1).unwrap_or(selected),
         MoveDirection::Down => move_vertical(current, &positions, 1).unwrap_or(selected),
     }
@@ -666,10 +694,10 @@ mod tests {
     }
 
     #[test]
-    fn horizontal_navigation_stays_within_group_row() {
+    fn horizontal_navigation_wraps_to_adjacent_row() {
         let groups = vec![group(1), group(2)];
-        assert_eq!(move_selection(0, &groups, 3, MoveDirection::Right), 0);
+        assert_eq!(move_selection(0, &groups, 3, MoveDirection::Right), 1);
         assert_eq!(move_selection(1, &groups, 3, MoveDirection::Right), 2);
-        assert_eq!(move_selection(1, &groups, 3, MoveDirection::Left), 1);
+        assert_eq!(move_selection(1, &groups, 3, MoveDirection::Left), 0);
     }
 }
