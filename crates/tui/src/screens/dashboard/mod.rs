@@ -7,7 +7,9 @@ use std::{
 };
 
 use backend::{AppState, HostAuth, SshEndpoint, SshHost};
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
+};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -156,6 +158,22 @@ fn handle_mouse(
     }
 
     if state.quick_switcher.is_some() {
+        return None;
+    }
+
+    if state.active_page == DashboardPage::Home {
+        let key = match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                Some(KeyEvent::new(KeyCode::Left, KeyModifiers::empty()))
+            }
+            MouseEventKind::ScrollDown => {
+                Some(KeyEvent::new(KeyCode::Right, KeyModifiers::empty()))
+            }
+            _ => None,
+        };
+        if let Some(event) = key {
+            pages::home::handle_key(app, event, state);
+        }
         return None;
     }
 

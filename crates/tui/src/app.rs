@@ -240,6 +240,10 @@ impl App {
         matches!(&self.screen, Screen::Dashboard { state } if state.active_page == DashboardPage::Ssh)
     }
 
+    pub(crate) fn is_dashboard_screen(&self) -> bool {
+        matches!(&self.screen, Screen::Dashboard { .. })
+    }
+
     pub(crate) fn has_modal_open(&self) -> bool {
         matches!(&self.screen, Screen::Dashboard { state } if state.host_modal.is_some() || state.endpoint_picker.is_some() || state.quick_switcher.is_some() || state.settings_modal.is_some() || state.settings_backup_modal.is_some() || state.update_prompt.is_some())
     }

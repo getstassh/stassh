@@ -83,7 +83,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
 
         terminal.draw(|frame| handler.render(frame, app))?;
 
-        let should_enable_mouse_capture = app.is_ssh_screen();
+        let should_enable_mouse_capture = app.is_ssh_screen() || app.is_dashboard_screen();
         if should_enable_mouse_capture != mouse_capture_enabled {
             if should_enable_mouse_capture {
                 execute!(terminal.backend_mut(), EnableMouseCapture)?;
