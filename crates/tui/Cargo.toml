@@ -1,15 +1,15 @@
 [package]
 name = "stassh"
-version = "1.2.1"
+version = "1.2.2"
 edition = "2024"
 
 [dependencies]
-anyhow = "1.0.102"
+anyhow = "1.0.103"
 backend = { version = "1.0.0", path = "../backend" }
 base64 = "0.22.1"
 crossterm = "0.29.0"
 ratatui = "0.30.0"
-russh = "0.61.1"
+russh = "0.62.2"
 serde_json = "1.0.149"
 tokio = { version = "1.48.0", features = ["io-std", "io-util", "rt-multi-thread", "time"] }
 ureq = { version = "3.3.0", features = ["json"] }
