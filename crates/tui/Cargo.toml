@@ -1,12 +1,12 @@
 [package]
 name = "stassh"
-version = "1.2.2"
+version = "1.2.3"
 edition = "2024"
 
 [dependencies]
 anyhow = "1.0.103"
 backend = { version = "1.0.0", path = "../backend" }
-base64 = "0.22.1"
+base64 = "0.23.0"
 crossterm = "0.29.0"
 ratatui = "0.30.0"
 russh = "0.62.2"
