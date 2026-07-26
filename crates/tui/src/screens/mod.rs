@@ -30,6 +30,7 @@ struct ScreenHandler<S> {
     render: fn(&mut Frame, &AppState, &S),
     handle_key: fn(&AppState, KeyEvent, &mut S) -> Option<AppEffect>,
     handle_mouse: fn(&AppState, MouseEvent, &mut S) -> Option<AppEffect>,
+    handle_focus: fn(&AppState, bool, &mut S) -> Option<AppEffect>,
     handle_paste: fn(&AppState, &str, &mut S) -> Option<AppEffect>,
     handle_resize: fn(&AppState, u16, u16, &mut S) -> Option<AppEffect>,
     handle_tick: fn(&AppState, &mut S) -> Option<AppEffect>,
@@ -40,6 +41,7 @@ pub(crate) trait AnyScreenHandler: Sync {
     fn render(&self, frame: &mut Frame, app: &App);
     fn handle_key(&self, app: &mut App, key: KeyEvent);
     fn handle_mouse(&self, app: &mut App, mouse: MouseEvent);
+    fn handle_focus(&self, app: &mut App, focused: bool);
     fn handle_paste(&self, app: &mut App, text: &str);
     fn handle_resize(&self, app: &mut App, cols: u16, rows: u16);
     fn handle_tick(&self, app: &mut App);
@@ -78,6 +80,22 @@ impl<S: 'static> AnyScreenHandler for ScreenHandler<S> {
 
             if let Some(state) = (self.get_mut)(screen) {
                 (self.handle_mouse)(app_state, mouse, state)
+            } else {
+                None
+            }
+        };
+
+        if let Some(effect) = effect {
+            effect(app);
+        }
+    }
+
+    fn handle_focus(&self, app: &mut App, focused: bool) {
+        let effect = {
+            let (app_state, screen) = app.state_and_screen_mut();
+
+            if let Some(state) = (self.get_mut)(screen) {
+                (self.handle_focus)(app_state, focused, state)
             } else {
                 None
             }
@@ -182,6 +200,7 @@ static EMPTY_HANDLER: ScreenHandler<()> = ScreenHandler {
     },
     handle_key: |_, _, _| None,
     handle_mouse: |_, _, _| None,
+    handle_focus: |_, _, _| None,
     handle_paste: |_, _, _| None,
     handle_resize: |_, _, _, _| None,
     handle_tick: |_, _| None,

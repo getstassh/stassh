@@ -10,6 +10,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Clear, Paragraph},
 };
+use vt100::MouseProtocolMode;
 
 use crate::{
     inputs::handle_yes_no_input,
@@ -138,7 +139,14 @@ pub(crate) fn handle_paste(text: &str, state: &mut DashboardState) {
         tab.parser.screen_mut().set_scrollback(0);
         clear_selection_state(tab);
         if let SshSessionPhase::Running { live } = &mut tab.phase {
-            live.send_input(SessionInput::Data(text.as_bytes().to_vec()));
+            if tab.parser.screen().bracketed_paste() {
+                let mut bytes = b"\x1b[200~".to_vec();
+                bytes.extend_from_slice(text.as_bytes());
+                bytes.extend_from_slice(b"\x1b[201~");
+                live.send_input(SessionInput::Data(bytes));
+            } else {
+                live.send_input(SessionInput::Data(text.as_bytes().to_vec()));
+            }
         }
     }
 }
@@ -168,6 +176,15 @@ pub(crate) fn handle_mouse(mouse: MouseEvent, area: Rect, state: &mut DashboardS
     };
 
     if !matches!(tab.phase, SshSessionPhase::Running { .. }) {
+        return;
+    }
+
+    if tab.parser.screen().mouse_protocol_mode() != MouseProtocolMode::None {
+        if let Some(bytes) = mouse_to_sgr_bytes(mouse, area, tab) {
+            if let SshSessionPhase::Running { live } = &mut tab.phase {
+                live.send_input(SessionInput::Data(bytes));
+            }
+        }
         return;
     }
 
@@ -272,6 +289,19 @@ pub(crate) fn handle_mouse(mouse: MouseEvent, area: Rect, state: &mut DashboardS
     }
 }
 
+pub(crate) fn handle_focus(focused: bool, state: &mut DashboardState) {
+    for tab in &mut state.ssh_tabs {
+        if let SshSessionPhase::Running { live } = &mut tab.phase {
+            let bytes = if focused {
+                b"\x1b[I".to_vec()
+            } else {
+                b"\x1b[O".to_vec()
+            };
+            live.send_input(SessionInput::Data(bytes));
+        }
+    }
+}
+
 pub(crate) fn tick_tabs(app: &AppState, state: &mut DashboardState) {
     let mut idx = 0;
     while idx < state.ssh_tabs.len() {
@@ -335,7 +365,10 @@ pub(crate) fn tick_tabs(app: &AppState, state: &mut DashboardState) {
                 let parser = &mut tab.parser;
                 while let Some(event) = live.try_recv() {
                     match event {
-                        SessionEvent::OutputBytes(bytes) => parser.process(&bytes),
+                        SessionEvent::OutputBytes(bytes) => {
+                            let cleaned = strip_and_forward_osc52(&bytes);
+                            parser.process(&cleaned);
+                        }
                         SessionEvent::Error(error) => {
                             if close_status.is_none() {
                                 close_status = Some(error);
@@ -846,6 +879,54 @@ fn mouse_to_cell(mouse: MouseEvent, area: Rect, tab: &SshSessionState) -> Option
     })
 }
 
+fn mouse_to_sgr_bytes(mouse: MouseEvent, area: Rect, tab: &SshSessionState) -> Option<Vec<u8>> {
+    if tab.parser.screen().scrollback() != 0 {
+        return None;
+    }
+
+    let pos = mouse_to_cell(mouse, area, tab)?;
+
+    let col = pos.col.saturating_add(1);
+    let row = u16::try_from(pos.row).ok()?.saturating_add(1);
+
+    let (button, suffix) = match mouse.kind {
+        MouseEventKind::Down(btn) => (sgr_button_code(btn, mouse.modifiers), b'M'),
+        MouseEventKind::Up(_) => (3u16 + sgr_modifier_flags(mouse.modifiers), b'm'),
+        MouseEventKind::Drag(btn) => {
+            (sgr_button_code(btn, mouse.modifiers).saturating_add(32), b'M')
+        }
+        MouseEventKind::ScrollUp => (64u16 + sgr_modifier_flags(mouse.modifiers), b'M'),
+        MouseEventKind::ScrollDown => (65u16 + sgr_modifier_flags(mouse.modifiers), b'M'),
+        _ => return None,
+    };
+
+    let bytes = format!("\x1b[<{};{};{}{}", button, col, row, suffix as char);
+    Some(bytes.into_bytes())
+}
+
+fn sgr_button_code(btn: MouseButton, modifiers: KeyModifiers) -> u16 {
+    let base = match btn {
+        MouseButton::Left => 0,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+    };
+    base + sgr_modifier_flags(modifiers)
+}
+
+fn sgr_modifier_flags(modifiers: KeyModifiers) -> u16 {
+    let mut flags = 0u16;
+    if modifiers.contains(KeyModifiers::SHIFT) {
+        flags += 4;
+    }
+    if modifiers.contains(KeyModifiers::ALT) {
+        flags += 8;
+    }
+    if modifiers.contains(KeyModifiers::CONTROL) {
+        flags += 16;
+    }
+    flags
+}
+
 fn copy_current_selection(tab: &SshSessionState) -> Result<usize, String> {
     let screen = tab.parser.screen();
     let (rows, cols) = screen.size();
@@ -925,6 +1006,64 @@ fn is_word_cell(screen: &vt100::Screen, row: u16, col: u16) -> bool {
     screen.cell(row, col).is_some_and(|cell| {
         cell.has_contents() && !cell.contents().chars().all(char::is_whitespace)
     })
+}
+
+fn strip_and_forward_osc52(bytes: &[u8]) -> Vec<u8> {
+    let mut cleaned = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if i + 1 < bytes.len() && bytes[i] == b'\x1b' && bytes[i + 1] == b']' {
+            let seq_start = i;
+            i += 2;
+
+            let mut param_end = i;
+            while param_end < bytes.len() && bytes[param_end].is_ascii_digit() {
+                param_end += 1;
+            }
+            if param_end == i || param_end >= bytes.len() || bytes[param_end] != b';' {
+                cleaned.push(bytes[seq_start]);
+                i = seq_start + 1;
+                continue;
+            }
+            let param: u32 = bytes[i..param_end]
+                .iter()
+                .fold(0u32, |acc, &b| acc * 10 + u32::from(b - b'0'));
+            i = param_end + 1;
+
+            if param == 52 {
+                let mut terminator = None;
+                let mut j = i;
+                while j < bytes.len() {
+                    if bytes[j] == b'\x07' {
+                        terminator = Some(j + 1);
+                        break;
+                    }
+                    if bytes[j] == b'\x1b' && j + 1 < bytes.len() && bytes[j + 1] == b'\\' {
+                        terminator = Some(j + 2);
+                        break;
+                    }
+                    j += 1;
+                }
+
+                if let Some(end) = terminator {
+                    let _ = std::io::stdout().write_all(&bytes[seq_start..end]);
+                    let _ = std::io::stdout().flush();
+                    i = end;
+                    continue;
+                }
+            } else {
+                cleaned.push(b'\x1b');
+                i = seq_start + 1;
+                continue;
+            }
+        }
+
+        cleaned.push(bytes[i]);
+        i += 1;
+    }
+
+    cleaned
 }
 
 fn copy_text_to_clipboard_osc52(text: &str) -> Result<(), String> {

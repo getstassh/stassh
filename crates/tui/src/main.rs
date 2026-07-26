@@ -157,13 +157,16 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                             handler.handle_mouse(app, mouse);
                         }
                         Event::FocusGained => {
+                            handler.handle_focus(app, true);
                             if let Ok((cols, rows)) = crossterm::terminal::size() {
                                 if cols > 0 && rows > 0 {
                                     handler.handle_resize(app, cols, rows);
                                 }
                             }
                         }
-                        _ => {}
+                        Event::FocusLost => {
+                            handler.handle_focus(app, false);
+                        }
                     }
                 }
 

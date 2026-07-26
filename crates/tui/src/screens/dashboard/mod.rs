@@ -51,6 +51,7 @@ pub(crate) static HANDLER: ScreenHandler<DashboardState> = ScreenHandler {
     render: ui,
     handle_key,
     handle_mouse,
+    handle_focus,
     handle_paste,
     handle_resize,
     handle_tick,
@@ -183,6 +184,11 @@ fn handle_mouse(
         }
     }
 
+    None
+}
+
+fn handle_focus(_app: &AppState, focused: bool, state: &mut DashboardState) -> Option<AppEffect> {
+    pages::ssh::handle_focus(focused, state);
     None
 }
 

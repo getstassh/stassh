@@ -25,6 +25,7 @@ pub(crate) static HANDLER: ScreenHandler<StartupUpdateState> = ScreenHandler {
     render: ui,
     handle_key,
     handle_mouse: |_, _, _| None,
+    handle_focus: |_, _, _| None,
     handle_paste: |_, _, _| None,
     handle_resize: |_, _, _, _| None,
     handle_tick,
