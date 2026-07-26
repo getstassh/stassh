@@ -25,7 +25,7 @@ use crate::{
 
 const IDLE_TIMEOUT_STEP: u64 = 30;
 const IDLE_TIMEOUT_MAX: u64 = 86_400;
-const CONNECT_TIMEOUT_MAX: u64 = 60;
+const CONNECT_TIMEOUT_MAX: u64 = 120;
 
 #[derive(Clone, Copy)]
 enum SettingsRow {

@@ -22,7 +22,7 @@ impl Config {
             last_telemetry_report_at_unix_ms: None,
             db_encryption: None,
             ssh_idle_timeout_seconds: 600,
-            ssh_connect_timeout_seconds: 5,
+            ssh_connect_timeout_seconds: 30,
             ssh_fullscreen: false,
         }
     }
