@@ -1,7 +1,7 @@
 use std::{
     ops::{Deref, DerefMut},
     sync::mpsc::{self, TryRecvError},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use backend::{
@@ -25,6 +25,7 @@ pub(crate) struct App {
     boot_completed: bool,
     exit_requested: bool,
     restart_requested: bool,
+    exit_pending: Option<Instant>,
 }
 
 impl App {
@@ -41,6 +42,7 @@ impl App {
             boot_completed: false,
             exit_requested: false,
             restart_requested: false,
+            exit_pending: None,
         };
 
         app.boot_completed = true;
@@ -250,6 +252,14 @@ impl App {
 
     pub(crate) fn is_quick_switcher_open(&self) -> bool {
         matches!(&self.screen, Screen::Dashboard { state } if state.quick_switcher.is_some())
+    }
+
+    pub(crate) fn exit_pending(&self) -> Option<Instant> {
+        self.exit_pending
+    }
+
+    pub(crate) fn set_exit_pending(&mut self, instant: Option<Instant>) {
+        self.exit_pending = instant;
     }
 }
 

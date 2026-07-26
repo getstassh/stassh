@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     fs,
     net::{TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
@@ -37,6 +38,27 @@ mod pages;
 
 const HOST_PROBE_INTERVAL: Duration = Duration::from_secs(5);
 const HOST_PROBE_TIMEOUT_CAP: Duration = Duration::from_secs(2);
+
+fn render_exit_toast(frame: &mut Frame, area: Rect, state: &DashboardState) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    if !state.exit_pending_at.is_some_and(|t| t.elapsed().as_secs() < 1) {
+        return;
+    }
+    let message = " Press Esc again to exit ";
+    let toast_width = (message.chars().count() as u16).min(area.width);
+    let toast_area = Rect {
+        x: area.x + area.width.saturating_sub(toast_width),
+        y: area.y,
+        width: toast_width,
+        height: 1,
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(message, accent_text())])),
+        toast_area,
+    );
+}
 
 pub(crate) static HANDLER: ScreenHandler<DashboardState> = ScreenHandler {
     matches: |s| matches!(s, Screen::Dashboard { .. }),
@@ -1731,7 +1753,7 @@ fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
         DashboardPage::Settings => "Stassh Settings",
         DashboardPage::Ssh => "Stassh SSH Session",
     };
-    let (inner, area) = full_rect(a, header_title, footer);
+    let (inner, area) = full_rect(a, header_title, &footer);
     frame.render_widget(inner, a);
     let content_block = frame_block();
     let content_area = content_block.inner(area);
@@ -1758,6 +1780,8 @@ fn ui(frame: &mut Frame, app: &AppState, state: &DashboardState) {
     if let Some(update_prompt) = &state.update_prompt {
         render_update_prompt_modal(frame, a, update_prompt);
     }
+
+    render_exit_toast(frame, a, state);
 }
 
 fn render_update_prompt_modal(
@@ -2281,30 +2305,34 @@ fn render_key_picker(frame: &mut Frame, host_popup: Rect, picker: &HostKeyPicker
     );
 }
 
-fn keybind_hint(state: &DashboardState) -> &'static str {
+fn keybind_hint(state: &DashboardState) -> Cow<'static, str> {
+    if state.exit_pending_at.is_some() {
+        return Cow::Borrowed("Press Esc again to exit");
+    }
+
     if state.update_prompt.is_some() {
-        return "";
+        return Cow::Borrowed("");
     }
 
     if state.host_modal.is_some() {
-        return "Tab/Up/Down move | Ctrl+S save | Esc";
+        return Cow::Borrowed("Tab/Up/Down move | Ctrl+S save | Esc");
     }
 
     if state.endpoint_picker.is_some() {
-        return "Up/Down or j/k move | Enter connect | Esc cancel";
+        return Cow::Borrowed("Up/Down or j/k move | Enter connect | Esc cancel");
     }
 
     if state.quick_switcher.is_some() {
         if state.active_page == DashboardPage::Ssh {
-            return "Ctrl+Q/Up/Down cycle | Type filter | X close tab | Esc close";
+            return Cow::Borrowed("Ctrl+Q/Up/Down cycle | Type filter | X close tab | Esc close");
         }
-        return "Ctrl+Q/Up/Down cycle | Type filter | Esc close";
+        return Cow::Borrowed("Ctrl+Q/Up/Down cycle | Type filter | Esc close");
     }
 
     match state.active_page {
-        DashboardPage::Home => pages::home::footer_hint(),
-        DashboardPage::Settings => pages::settings::footer_hint(state),
-        DashboardPage::Ssh => pages::ssh::footer_hint(),
+        DashboardPage::Home => Cow::Borrowed(pages::home::footer_hint()),
+        DashboardPage::Settings => Cow::Borrowed(pages::settings::footer_hint(state)),
+        DashboardPage::Ssh => Cow::Borrowed(pages::ssh::footer_hint()),
     }
 }
 

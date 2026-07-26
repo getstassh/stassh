@@ -58,6 +58,7 @@ pub(crate) struct SshSessionState {
     pub(crate) selection: Option<SshSelectionState>,
     pub(crate) last_click: Option<SshClickState>,
     pub(crate) copy_toast: Option<SshCopyToast>,
+    pub(crate) exit_pending_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,6 +110,7 @@ impl SshSessionState {
             selection: None,
             last_click: None,
             copy_toast: None,
+            exit_pending_at: None,
         }
     }
 
@@ -174,6 +176,7 @@ pub(crate) struct DashboardState {
     pub(crate) settings_modal: Option<SettingsSecurityModalState>,
     pub(crate) settings_backup_modal: Option<SettingsBackupModalState>,
     pub(crate) update_prompt: Option<DashboardUpdatePromptState>,
+    pub(crate) exit_pending_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -322,6 +325,7 @@ impl DashboardState {
             settings_modal: None,
             settings_backup_modal: None,
             update_prompt: None,
+            exit_pending_at: None,
         }
     }
 }

@@ -88,14 +88,20 @@ pub(crate) fn handle_key(key: KeyEvent, state: &mut DashboardState) -> Option<Ap
         }
         SshSessionPhase::Running { .. } => {
             if key.code == KeyCode::Esc {
-                if tab.selection.take().is_some() {
+                tab.selection.take();
+                let now = Instant::now();
+                if tab.exit_pending_at.is_some_and(|t| now.duration_since(t).as_secs() < 1) {
+                    if let SshSessionPhase::Running { live } = &mut tab.phase {
+                        live.send_input(SessionInput::Disconnect);
+                    }
+                    tab.exit_pending_at = None;
                     return None;
                 }
-                if let SshSessionPhase::Running { live } = &mut tab.phase {
-                    live.send_input(SessionInput::Disconnect);
-                }
+                tab.exit_pending_at = Some(now);
                 return None;
             }
+
+            tab.exit_pending_at = None;
 
             if handle_scrollback_key(key, tab) {
                 return None;
@@ -469,6 +475,7 @@ pub(crate) fn render(frame: &mut Frame, app_area: Rect, area: Rect, state: &Dash
                 area,
             );
             render_copy_toast(frame, area, tab);
+            render_exit_toast(frame, area, tab);
         }
     }
 }
@@ -656,6 +663,30 @@ fn render_copy_toast(frame: &mut Frame, area: Rect, tab: &SshSessionState) {
     }
 
     let message = format!(" {} ", toast.message);
+    let toast_width = (message.chars().count() as u16).min(area.width);
+    let toast_area = Rect {
+        x: area.x + area.width.saturating_sub(toast_width),
+        y: area.y,
+        width: toast_width,
+        height: 1,
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(message, accent_text())])),
+        toast_area,
+    );
+}
+
+fn render_exit_toast(frame: &mut Frame, area: Rect, tab: &SshSessionState) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let Some(pending_at) = tab.exit_pending_at else {
+        return;
+    };
+    if pending_at.elapsed().as_secs() >= 1 {
+        return;
+    }
+    let message = " Press Esc again to disconnect ";
     let toast_width = (message.chars().count() as u16).min(area.width);
     let toast_area = Rect {
         x: area.x + area.width.saturating_sub(toast_width),

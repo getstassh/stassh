@@ -1,6 +1,8 @@
 use std::io;
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use crate::navigation::Screen;
 
 use anyhow::Result;
 
@@ -131,17 +133,34 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
                                 key.kind == KeyEventKind::Release && app.is_quick_switcher_open();
 
                             if is_press_or_repeat || is_quick_switch_release {
-                                if key.code == KeyCode::Esc
+                                let is_exit_context =
+                                    key.code == KeyCode::Esc
                                     && !app.is_ssh_screen()
-                                    && !app.has_modal_open()
-                                {
-                                    return Ok(());
-                                }
+                                    && !app.has_modal_open();
 
-                                handler.handle_key(app, key);
-
-                                if app.exit_requested() {
-                                    return Ok(());
+                                if is_exit_context {
+                                    let now = Instant::now();
+                                    let should_exit = app.exit_pending().is_some_and(|t| now.duration_since(t).as_secs() < 1);
+                                    if should_exit {
+                                        return Ok(());
+                                    }
+                                    app.set_exit_pending(Some(now));
+                                    if let Screen::Dashboard { state } = &mut app.screen {
+                                        state.exit_pending_at = Some(now);
+                                        state.last_status = Some("Press Esc again to exit".to_string());
+                                    }
+                                } else {
+                                    if app.exit_pending().is_some() {
+                                        app.set_exit_pending(None);
+                                        if let Screen::Dashboard { state } = &mut app.screen {
+                                            state.exit_pending_at = None;
+                                            state.last_status = None;
+                                        }
+                                    }
+                                    handler.handle_key(app, key);
+                                    if app.exit_requested() {
+                                        return Ok(());
+                                    }
                                 }
                             }
                         }
