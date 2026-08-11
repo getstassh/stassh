@@ -36,6 +36,14 @@ fn handle_key(_: &AppState, key: KeyEvent, state: &mut StringState) -> Option<Ap
     if let Some(text) = text {
         let text = text.to_string();
         return Some(Box::new(move |app| {
+            if text.trim().is_empty() {
+                app.password = None;
+                app.screen = Screen::AskingPassphrase {
+                    state: StringState::invisible_with_error("Passphrase cannot be empty".to_string()),
+                };
+                return;
+            }
+
             if !app.is_correct_password(&text) {
                 app.password = None;
                 app.screen = Screen::AskingPassphrase {
